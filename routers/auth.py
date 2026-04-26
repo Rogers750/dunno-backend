@@ -1,138 +1,86 @@
+import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database.supabase_client import supabase
-from models.auth import (
-    RegisterRequest,
-    LoginRequest,
-    OtpSendRequest,
-    OtpVerifyRequest,
-    AuthResponse,
-    UserResponse,
-)
+from models.auth import OtpSendRequest, OtpVerifyRequest, AuthResponse, UserResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
-
-def _get_profile_username(user_id: str) -> str:
-    result = supabase.table("profiles").select("username").eq("id", user_id).single().execute()
-    return result.data.get("username", "") if result.data else ""
+# temporary in-memory store: session_id -> email
+_otp_sessions: dict[str, str] = {}
 
 
-@router.post("/register", response_model=AuthResponse)
-async def register(payload: RegisterRequest):
-    logger.info(f"[register] attempt email={payload.email} username={payload.username}")
-    username = payload.username.strip().lower()
-
-    existing = supabase.table("profiles").select("id").eq("username", username).execute()
-    if existing.data:
-        logger.warning(f"[register] username already taken: {username}")
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    try:
-        result = supabase.auth.sign_up({
-            "email": payload.email,
-            "password": payload.password,
-        })
-    except Exception as e:
-        logger.error(f"[register] supabase sign_up failed: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if not result.user:
-        logger.error("[register] supabase returned no user after sign_up")
-        raise HTTPException(status_code=400, detail="Registration failed")
-
-    user = result.user
-    session = result.session
-    logger.info(f"[register] auth user created id={user.id}")
-
-    try:
-        supabase.table("profiles").insert({
-            "id": user.id,
-            "username": username,
-            "email": payload.email,
-        }).execute()
-        logger.info(f"[register] profile created username={username}")
-    except Exception as e:
-        logger.error(f"[register] failed to insert profile: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create profile")
-
-    return AuthResponse(
-        access_token=session.access_token if session else "",
-        user=UserResponse(id=user.id, email=user.email or payload.email, username=username),
-    )
-
-
-@router.post("/login", response_model=AuthResponse)
-async def login(payload: LoginRequest):
-    logger.info(f"[login] attempt email={payload.email}")
-    try:
-        result = supabase.auth.sign_in_with_password({
-            "email": payload.email,
-            "password": payload.password,
-        })
-    except Exception as e:
-        logger.warning(f"[login] failed for email={payload.email}: {e}")
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    if not result.user or not result.session:
-        logger.warning(f"[login] no user/session returned for email={payload.email}")
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    user = result.user
-    username = _get_profile_username(user.id)
-    logger.info(f"[login] success id={user.id} username={username}")
-
-    return AuthResponse(
-        access_token=result.session.access_token,
-        user=UserResponse(id=user.id, email=user.email or payload.email, username=username),
-    )
-
-
-@router.post("/otp/send")
+@router.post("/verification/send")
 async def send_otp(payload: OtpSendRequest):
-    logger.info(f"[otp/send] sending OTP to email={payload.email}")
+    logger.info(f"[verification/send] email={payload.email}")
     try:
         supabase.auth.sign_in_with_otp({
             "email": payload.email,
-            "options": {"should_create_user": False},
+            "options": {"should_create_user": True},
         })
-        logger.info(f"[otp/send] OTP sent to email={payload.email}")
     except Exception as e:
-        logger.error(f"[otp/send] failed for email={payload.email}: {e}")
+        logger.error(f"[verification/send] failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-    return {"message": "One-time code sent to your email"}
+    session_id = str(uuid.uuid4())
+    _otp_sessions[session_id] = payload.email
+    logger.info(f"[verification/send] OTP sent, session_id={session_id}")
+    return {"message": "OTP sent to your email", "session_id": session_id}
 
 
-@router.post("/otp/verify", response_model=AuthResponse)
+@router.post("/verification/verify", response_model=AuthResponse)
 async def verify_otp(payload: OtpVerifyRequest):
-    logger.info(f"[otp/verify] attempt email={payload.email}")
+    email = _otp_sessions.get(payload.session_id)
+    if not email:
+        logger.warning(f"[verification/verify] invalid session_id={payload.session_id}")
+        raise HTTPException(status_code=400, detail="Invalid or expired session")
+
+    logger.info(f"[verification/verify] session_id={payload.session_id} email={email}")
     try:
         result = supabase.auth.verify_otp({
-            "email": payload.email,
+            "email": email,
             "token": payload.otp,
             "type": "email",
         })
     except Exception as e:
-        logger.warning(f"[otp/verify] failed for email={payload.email}: {e}")
-        raise HTTPException(status_code=400, detail="Invalid or expired code")
+        logger.warning(f"[verification/verify] failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
     if not result.user or not result.session:
-        logger.warning(f"[otp/verify] no user/session after OTP verify email={payload.email}")
         raise HTTPException(status_code=400, detail="OTP verification failed")
 
+    _otp_sessions.pop(payload.session_id, None)
     user = result.user
-    username = _get_profile_username(user.id)
-    logger.info(f"[otp/verify] success id={user.id} username={username}")
+    email = user.email or email
+
+    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    if existing.data:
+        username = existing.data[0]["username"]
+        logger.info(f"[verification/verify] existing profile username={username}")
+    else:
+        base = email.split("@")[0].lower()
+        username = "".join(c for c in base if c.isalnum())
+        candidate = username
+        suffix = 1
+        while supabase.table("profiles").select("id").eq("username", candidate).execute().data:
+            candidate = f"{username}{suffix}"
+            suffix += 1
+        username = candidate
+        try:
+            supabase.table("profiles").insert({"id": user.id, "username": username, "email": email}).execute()
+            logger.info(f"[verification/verify] new profile created username={username}")
+        except Exception as e:
+            logger.error(f"[verification/verify] failed to create profile: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create profile")
 
     return AuthResponse(
         access_token=result.session.access_token,
-        user=UserResponse(id=user.id, email=user.email or payload.email, username=username),
+        user=UserResponse(id=user.id, email=email, username=username),
     )
 
 
@@ -140,10 +88,10 @@ async def verify_otp(payload: OtpVerifyRequest):
 async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(security)):
     logger.info("[google] POST /auth/google called")
     if not credentials:
-        logger.warning("[google] no Authorization header provided")
+        logger.warning("[google] no Authorization header")
         raise HTTPException(status_code=401, detail="Authorization header missing")
 
-    logger.info(f"[google] token received (first 20 chars): {credentials.credentials[:20]}")
+    logger.info(f"[google] token (first 20): {credentials.credentials[:20]}")
     try:
         result = supabase.auth.get_user(credentials.credentials)
     except Exception as e:
@@ -151,18 +99,16 @@ async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(secur
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     if not result.user:
-        logger.warning("[google] get_user returned no user")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = result.user
-    user_id = user.id
     email = user.email or ""
-    logger.info(f"[google] token valid id={user_id} email={email}")
+    logger.info(f"[google] token valid id={user.id} email={email}")
 
-    existing = supabase.table("profiles").select("id, username, email").eq("id", user_id).execute()
+    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
     if existing.data:
         profile = existing.data[0]
-        logger.info(f"[google] existing profile found username={profile['username']}")
+        logger.info(f"[google] existing profile username={profile['username']}")
         return UserResponse(id=profile["id"], email=profile["email"] or email, username=profile["username"])
 
     base = email.split("@")[0].lower()
@@ -173,28 +119,21 @@ async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(secur
         candidate = f"{username}{suffix}"
         suffix += 1
 
-    logger.info(f"[google] creating new profile username={candidate}")
     try:
-        supabase.table("profiles").insert({
-            "id": user_id,
-            "username": candidate,
-            "email": email,
-        }).execute()
-        logger.info(f"[google] profile created id={user_id} username={candidate}")
+        supabase.table("profiles").insert({"id": user.id, "username": candidate, "email": email}).execute()
+        logger.info(f"[google] profile created username={candidate}")
     except Exception as e:
         logger.error(f"[google] failed to insert profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to create profile")
 
-    return UserResponse(id=user_id, email=email, username=candidate)
+    return UserResponse(id=user.id, email=email, username=candidate)
 
 
 @router.get("/me", response_model=UserResponse)
 async def me(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    logger.info("[me] GET /auth/me called")
+    logger.info("[me] called")
     if not credentials:
-        logger.warning("[me] no Authorization header provided")
         raise HTTPException(status_code=401, detail="Authorization header missing")
-
     try:
         result = supabase.auth.get_user(credentials.credentials)
     except Exception as e:
@@ -202,11 +141,10 @@ async def me(credentials: HTTPAuthorizationCredentials = Depends(security)):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     if not result.user:
-        logger.warning("[me] get_user returned no user")
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = result.user
-    username = _get_profile_username(user.id)
-    logger.info(f"[me] success id={user.id} username={username}")
-
+    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    username = existing.data[0]["username"] if existing.data else ""
+    logger.info(f"[me] id={user.id} username={username}")
     return UserResponse(id=user.id, email=user.email or "", username=username)

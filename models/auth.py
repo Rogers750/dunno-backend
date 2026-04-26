@@ -3,8 +3,6 @@ from pydantic import BaseModel, EmailStr
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str
-    username: str
 
 
 class LoginRequest(BaseModel):
@@ -17,7 +15,7 @@ class OtpSendRequest(BaseModel):
 
 
 class OtpVerifyRequest(BaseModel):
-    email: EmailStr
+    session_id: str
     otp: str
 
 
