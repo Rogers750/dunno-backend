@@ -12,7 +12,7 @@ from models.auth import (
 )
 
 router = APIRouter()
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def _get_profile_username(user_id: str) -> str:
@@ -117,6 +117,8 @@ async def verify_otp(payload: OtpVerifyRequest):
 
 @router.post("/google", response_model=UserResponse)
 async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
     try:
         result = supabase.auth.get_user(credentials.credentials)
     except Exception:
