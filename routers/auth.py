@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from database.supabase_client import supabase
+from database.supabase_client import supabase, supabase_admin
 from models.auth import OtpSendRequest, OtpVerifyRequest, AuthResponse, UserResponse
 
 logger = logging.getLogger(__name__)
@@ -127,6 +127,52 @@ async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(secur
         raise HTTPException(status_code=500, detail="Failed to create profile")
 
     return UserResponse(id=user.id, email=email, username=candidate)
+
+
+DEV_EMAIL = "sagarsinghraw77@gmail.com"
+
+
+@router.post("/dev-login", response_model=AuthResponse)
+async def dev_login():
+    try:
+        result = supabase_admin.auth.admin.generate_link({
+            "type": "magiclink",
+            "email": DEV_EMAIL,
+        })
+    except Exception as e:
+        logger.error(f"[dev-login] generate_link failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    token = result.properties.hashed_token if result.properties else None
+    if not token:
+        raise HTTPException(status_code=500, detail="Failed to generate token")
+
+    try:
+        verified = supabase.auth.verify_otp({
+            "email": DEV_EMAIL,
+            "token": token,
+            "type": "magiclink",
+        })
+    except Exception as e:
+        logger.error(f"[dev-login] verify failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not verified.user or not verified.session:
+        raise HTTPException(status_code=500, detail="Dev login failed")
+
+    user = verified.user
+    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    if existing.data:
+        username = existing.data[0]["username"]
+    else:
+        username = "sagarrawal"
+        supabase.table("profiles").insert({"id": user.id, "username": username, "email": DEV_EMAIL}).execute()
+
+    logger.info(f"[dev-login] success id={user.id}")
+    return AuthResponse(
+        access_token=verified.session.access_token,
+        user=UserResponse(id=user.id, email=DEV_EMAIL, username=username),
+    )
 
 
 @router.get("/me", response_model=UserResponse)
