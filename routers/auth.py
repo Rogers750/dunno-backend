@@ -143,14 +143,13 @@ async def dev_login():
         logger.error(f"[dev-login] generate_link failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    token = result.properties.hashed_token if result.properties else None
-    if not token:
+    hashed_token = result.properties.hashed_token if result.properties else None
+    if not hashed_token:
         raise HTTPException(status_code=500, detail="Failed to generate token")
 
     try:
         verified = supabase.auth.verify_otp({
-            "email": DEV_EMAIL,
-            "token": token,
+            "token_hash": hashed_token,
             "type": "magiclink",
         })
     except Exception as e:
