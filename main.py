@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO)
 
-from routers import auth
+from routers import auth, resume, links
 
 app = FastAPI(title="KnowMe API", version="1.0.0")
 
@@ -22,6 +22,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(resume.router, prefix="/resume", tags=["resume"])
+app.include_router(links.router, prefix="/links", tags=["links"])
 
 
 @app.get("/health")
