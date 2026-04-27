@@ -23,6 +23,7 @@ class UserResponse(BaseModel):
     id: str
     email: str
     username: str
+    status: str = "onboarding"
 
 
 class AuthResponse(BaseModel):

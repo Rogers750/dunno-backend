@@ -58,10 +58,11 @@ async def verify_otp(payload: OtpVerifyRequest):
     user = result.user
     email = user.email or email
 
-    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    existing = supabase.table("profiles").select("id, username, email, status").eq("id", user.id).execute()
     if existing.data:
         username = existing.data[0]["username"]
-        logger.info(f"[verification/verify] existing profile username={username}")
+        status = existing.data[0].get("status", "onboarding")
+        logger.info(f"[verification/verify] existing profile username={username} status={status}")
     else:
         base = email.split("@")[0].lower()
         username = "".join(c for c in base if c.isalnum())
@@ -71,8 +72,9 @@ async def verify_otp(payload: OtpVerifyRequest):
             candidate = f"{username}{suffix}"
             suffix += 1
         username = candidate
+        status = "onboarding"
         try:
-            supabase.table("profiles").insert({"id": user.id, "username": username, "email": email}).execute()
+            supabase.table("profiles").insert({"id": user.id, "username": username, "email": email, "status": status}).execute()
             logger.info(f"[verification/verify] new profile created username={username}")
         except Exception as e:
             logger.error(f"[verification/verify] failed to create profile: {e}")
@@ -80,7 +82,7 @@ async def verify_otp(payload: OtpVerifyRequest):
 
     return AuthResponse(
         access_token=result.session.access_token,
-        user=UserResponse(id=user.id, email=email, username=username),
+        user=UserResponse(id=user.id, email=email, username=username, status=status),
     )
 
 
@@ -105,11 +107,11 @@ async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(secur
     email = user.email or ""
     logger.info(f"[google] token valid id={user.id} email={email}")
 
-    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    existing = supabase.table("profiles").select("id, username, email, status").eq("id", user.id).execute()
     if existing.data:
         profile = existing.data[0]
         logger.info(f"[google] existing profile username={profile['username']}")
-        return UserResponse(id=profile["id"], email=profile["email"] or email, username=profile["username"])
+        return UserResponse(id=profile["id"], email=profile["email"] or email, username=profile["username"], status=profile.get("status", "onboarding"))
 
     base = email.split("@")[0].lower()
     username = "".join(c for c in base if c.isalnum())
@@ -120,13 +122,13 @@ async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(secur
         suffix += 1
 
     try:
-        supabase.table("profiles").insert({"id": user.id, "username": candidate, "email": email}).execute()
+        supabase.table("profiles").insert({"id": user.id, "username": candidate, "email": email, "status": "onboarding"}).execute()
         logger.info(f"[google] profile created username={candidate}")
     except Exception as e:
         logger.error(f"[google] failed to insert profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to create profile")
 
-    return UserResponse(id=user.id, email=email, username=candidate)
+    return UserResponse(id=user.id, email=email, username=candidate, status="onboarding")
 
 
 DEV_EMAIL = "sagarsinghraw77@gmail.com"
@@ -160,17 +162,19 @@ async def dev_login():
         raise HTTPException(status_code=500, detail="Dev login failed")
 
     user = verified.user
-    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    existing = supabase.table("profiles").select("id, username, email, status").eq("id", user.id).execute()
     if existing.data:
         username = existing.data[0]["username"]
+        status = existing.data[0].get("status", "onboarding")
     else:
         username = "sagarrawal"
-        supabase.table("profiles").insert({"id": user.id, "username": username, "email": DEV_EMAIL}).execute()
+        status = "onboarding"
+        supabase.table("profiles").insert({"id": user.id, "username": username, "email": DEV_EMAIL, "status": status}).execute()
 
-    logger.info(f"[dev-login] success id={user.id}")
+    logger.info(f"[dev-login] success id={user.id} status={status}")
     return AuthResponse(
         access_token=verified.session.access_token,
-        user=UserResponse(id=user.id, email=DEV_EMAIL, username=username),
+        user=UserResponse(id=user.id, email=DEV_EMAIL, username=username, status=status),
     )
 
 
@@ -189,7 +193,8 @@ async def me(credentials: HTTPAuthorizationCredentials = Depends(security)):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = result.user
-    existing = supabase.table("profiles").select("id, username, email").eq("id", user.id).execute()
+    existing = supabase.table("profiles").select("id, username, email, status").eq("id", user.id).execute()
     username = existing.data[0]["username"] if existing.data else ""
-    logger.info(f"[me] id={user.id} username={username}")
-    return UserResponse(id=user.id, email=user.email or "", username=username)
+    status = existing.data[0].get("status", "onboarding") if existing.data else "onboarding"
+    logger.info(f"[me] id={user.id} username={username} status={status}")
+    return UserResponse(id=user.id, email=user.email or "", username=username, status=status)
