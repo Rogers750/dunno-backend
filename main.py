@@ -15,6 +15,7 @@ app.add_middleware(
         "http://0.0.0.0:3000",
         "http://127.0.0.1:3000",
         "https://knowme.vercel.app",
+        "https://dunnoai.vercel.app",
         "https://dunno.app",
         "https://www.dunno.app",
     ],
