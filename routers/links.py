@@ -101,6 +101,30 @@ async def get_links(credentials: HTTPAuthorizationCredentials = Depends(security
     return result.data or []
 
 
+@router.get("/repos")
+async def get_repos(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    user = _get_user(credentials)
+    result = supabase.table("links").select("id, url, fetched, included").eq("user_id", user.id).eq("type", "github_repo").execute()
+
+    repos = []
+    for row in result.data or []:
+        f = row.get("fetched") or {}
+        repos.append({
+            "id": row["id"],
+            "included": row["included"],
+            "name": f.get("name"),
+            "description": f.get("description"),
+            "url": f.get("html_url"),
+            "stars": f.get("stargazers_count", 0),
+            "language": f.get("language"),
+            "topics": f.get("topics", []),
+        })
+
+    repos.sort(key=lambda r: r["stars"], reverse=True)
+    logger.info(f"[links/repos] user={user.id} repos={len(repos)}")
+    return repos
+
+
 @router.patch("/{link_id}/toggle")
 async def toggle_link(
     link_id: str,
