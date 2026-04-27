@@ -3,6 +3,7 @@ create table if not exists portfolios (
   user_id            uuid references profiles(id) on delete cascade not null,
   theme_color        text default 'indigo',
   theme_category     text default 'software',
+  selected_template  text default 'executive_minimal',  -- executive_minimal | modern_dark | creative_dev
   target_roles       text[],
   generated_content  jsonb,
   generated_at       timestamptz,

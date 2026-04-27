@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO)
 
-from routers import auth, resume, links
+from routers import auth, resume, links, portfolio
 
 app = FastAPI(title="KnowMe API", version="1.0.0")
 
@@ -15,6 +15,8 @@ app.add_middleware(
         "http://0.0.0.0:3000",
         "http://127.0.0.1:3000",
         "https://knowme.vercel.app",
+        "https://dunno.app",
+        "https://www.dunno.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -24,6 +26,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(resume.router, prefix="/resume", tags=["resume"])
 app.include_router(links.router, prefix="/links", tags=["links"])
+app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
 
 
 @app.get("/health")
