@@ -3,8 +3,9 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pypdf import PdfReader
+from supabase import Client
 
-from database.supabase_client import supabase
+from database.supabase_client import create_user_client, supabase
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,17 @@ def _get_user(credentials: HTTPAuthorizationCredentials):
     return result.user
 
 
+def _get_user_supabase(credentials: HTTPAuthorizationCredentials) -> Client:
+    return create_user_client(credentials.credentials)
+
+
 @router.post("/upload")
 async def upload_resume(
     file: UploadFile = File(...),
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     user = _get_user(credentials)
+    user_supabase = _get_user_supabase(credentials)
     logger.info(f"[resume/upload] user={user.id} file={file.filename}")
 
     if not file.filename.endswith(".pdf"):
@@ -49,26 +55,26 @@ async def upload_resume(
     # upload to supabase storage
     storage_path = f"{user.id}/resume.pdf"
     try:
-        supabase.storage.from_("resumes").upload(
+        user_supabase.storage.from_("resumes").upload(
             storage_path, contents, {"content-type": "application/pdf", "upsert": "true"}
         )
-        file_url = supabase.storage.from_("resumes").get_public_url(storage_path)
+        file_url = user_supabase.storage.from_("resumes").get_public_url(storage_path)
         logger.info(f"[resume/upload] uploaded to storage path={storage_path}")
     except Exception as e:
         logger.error(f"[resume/upload] storage upload failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload file")
 
     # upsert resume row
-    existing = supabase.table("resumes").select("id").eq("user_id", user.id).execute()
+    existing = user_supabase.table("resumes").select("id").eq("user_id", user.id).execute()
     if existing.data:
-        supabase.table("resumes").update({
+        user_supabase.table("resumes").update({
             "file_url": file_url,
             "raw_text": raw_text,
             "parsed": None,
         }).eq("user_id", user.id).execute()
         resume_id = existing.data[0]["id"]
     else:
-        result = supabase.table("resumes").insert({
+        result = user_supabase.table("resumes").insert({
             "user_id": user.id,
             "file_url": file_url,
             "raw_text": raw_text,
@@ -82,7 +88,8 @@ async def upload_resume(
 @router.get("/me")
 async def get_resume(credentials: HTTPAuthorizationCredentials = Depends(security)):
     user = _get_user(credentials)
-    result = supabase.table("resumes").select("id, file_url, uploaded_at").eq("user_id", user.id).execute()
+    user_supabase = _get_user_supabase(credentials)
+    result = user_supabase.table("resumes").select("id, file_url, uploaded_at").eq("user_id", user.id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="No resume found")
     return result.data[0]
