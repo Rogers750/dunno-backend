@@ -339,7 +339,8 @@ async def generate_portfolio(
         }).execute()
         portfolio_id = result.data[0]["id"]
 
-    # 7. Mark profile status → ready
+    # 7. Auto-publish + mark profile status → ready
+    user_client.table("portfolios").update({"published": True}).eq("id", portfolio_id).execute()
     supabase_admin.table("profiles").update({"status": "ready"}).eq("id", user.id).execute()
 
     logger.info(f"[portfolio/generate] done portfolio_id={portfolio_id}")
