@@ -18,6 +18,8 @@ app.add_middleware(
         "https://dunnoai.vercel.app",
         "https://dunno.app",
         "https://www.dunno.app",
+        "https://dunnoai.com",
+        "https://www.dunnoai.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
