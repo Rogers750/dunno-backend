@@ -197,8 +197,27 @@ SCHEMA (return exactly this structure):
     {
       "institution": "University Name",
       "degree": "B.Tech in Computer Science",
-      "duration": "2016 – 2020"
+      "duration": "2016 – 2020",
+      "gpa": "8.0"
     }
+  ],
+  "certifications": [
+    {
+      "name": "AWS Certified Solutions Architect",
+      "issuer": "Amazon Web Services",
+      "year": "2023"
+    }
+  ],
+  "publications": [
+    {
+      "title": "Article or paper title",
+      "url": "https://medium.com/...",
+      "year": "2022"
+    }
+  ],
+  "achievements": [
+    "Won national hackathon 2021",
+    "Speaker at PyCon India 2023"
   ],
   "target_roles": ["Senior Data Engineer", "MLOps Engineer"],
   "total_years_experience": 4.5
@@ -208,6 +227,9 @@ SCHEMA (return exactly this structure):
   If target_roles are explicitly provided in the prompt, use those instead.
 - total_years_experience: calculate total professional experience in years as a float
   by summing all experience durations. E.g. 4.5 means 4 years 6 months.
+- certifications: extract any certifications, licenses, or credentials from the resume. Empty array if none.
+- publications: extract any articles, blog posts, papers, or talks. Empty array if none.
+- achievements: extract notable awards, recognitions, competition wins, or standout accomplishments. Empty array if none.
 Do not deviate from this schema under any circumstances."""
 
 
@@ -324,6 +346,9 @@ async def generate_portfolio(
         "experience": [],
         "projects": [],
         "education": [],
+        "certifications": [],
+        "publications": [],
+        "achievements": [],
         "target_roles": [],
         "total_years_experience": 0,
     }
