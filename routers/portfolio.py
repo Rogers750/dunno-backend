@@ -194,9 +194,12 @@ SCHEMA (return exactly this structure):
       "degree": "B.Tech in Computer Science",
       "duration": "2016 – 2020"
     }
-  ]
+  ],
+  "target_roles": ["Senior Data Engineer", "MLOps Engineer"]
 }
 
+- target_roles: infer 2-4 most suitable job titles from the resume, experience level, and skills.
+  If target_roles are explicitly provided in the prompt, use those instead.
 Do not deviate from this schema under any circumstances."""
 
 
@@ -313,11 +316,17 @@ async def generate_portfolio(
         "experience": [],
         "projects": [],
         "education": [],
+        "target_roles": [],
     }
     for key, default in EMPTY_DEFAULTS.items():
         if key not in generated_content:
             logger.warning(f"[portfolio/generate] DeepSeek omitted '{key}', filling with empty default")
             generated_content[key] = default
+
+    # Use DeepSeek-inferred target_roles if caller did not explicitly provide them
+    if not payload.target_roles:
+        target_roles = generated_content.get("target_roles") or target_roles
+        logger.info(f"[portfolio/generate] inferred target_roles={target_roles}")
 
     # 6. Upsert portfolios row
     from datetime import datetime, timezone
