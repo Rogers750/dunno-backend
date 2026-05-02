@@ -293,6 +293,57 @@ async def get_company_info(
     return {"company_info": row.data[0].get("company_info") or {}}
 
 
+# ── POST /jobs/:id/resume ─────────────────────────────────────────────────────
+
+@jobs_router.post("/{match_id}/resume")
+async def generate_resume(
+    match_id: str,
+    background_tasks: BackgroundTasks,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """
+    Trigger on-demand resume generation for a matched job.
+    Runs builder + validator agents, saves result to DB.
+    Returns 202 immediately — poll GET /jobs/:id/resume for the result.
+    """
+    user = _get_user(credentials)
+
+    row = supabase_admin.table("user_matched_jobs").select("id").eq("id", match_id).eq("user_id", user.id).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    from jobs.crew import build_resume_for_match
+    from fastapi.responses import JSONResponse
+
+    background_tasks.add_task(build_resume_for_match, user_id=user.id, match_id=match_id)
+    return JSONResponse(status_code=202, content={"status": "building", "message": "Resume generation started. Poll GET /jobs/{id}/resume for result."})
+
+
+# ── POST /jobs/:id/cover ──────────────────────────────────────────────────────
+
+@jobs_router.post("/{match_id}/cover")
+async def generate_cover_letter(
+    match_id: str,
+    background_tasks: BackgroundTasks,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """
+    Trigger on-demand cover letter generation for a matched job.
+    Saves result to DB. Poll GET /jobs/:id/cover for the result.
+    """
+    user = _get_user(credentials)
+
+    row = supabase_admin.table("user_matched_jobs").select("id").eq("id", match_id).eq("user_id", user.id).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    from jobs.crew import build_cover_for_match
+    from fastapi.responses import JSONResponse
+
+    background_tasks.add_task(build_cover_for_match, user_id=user.id, match_id=match_id)
+    return JSONResponse(status_code=202, content={"status": "building", "message": "Cover letter generation started. Poll GET /jobs/{id}/cover for result."})
+
+
 # ── PATCH /profile/ctc ────────────────────────────────────────────────────────
 
 @profile_router.patch("/ctc")

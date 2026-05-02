@@ -111,8 +111,6 @@ def _save_match(
     job_id: str,
     match_result: MatchResult,
     company_info: CompanyInfo,
-    resume_json: dict,
-    cover_letter: str,
     project_suggestions: ProjectSuggestions,
 ) -> None:
     supabase_admin.table("user_matched_jobs").insert({
@@ -120,8 +118,8 @@ def _save_match(
         "job_id": job_id,
         "match_score": match_result.match_score,
         "score_breakdown": match_result.score_breakdown.model_dump(),
-        "resume_json": resume_json,
-        "cover_letter": cover_letter,
+        "resume_json": None,
+        "cover_letter": None,
         "project_suggestions": project_suggestions.model_dump(),
         "company_info": company_info.model_dump(),
         "status": "new",
@@ -180,35 +178,6 @@ def _run_company_researcher(company_name: str) -> CompanyInfo:
     except Exception:
         return CompanyInfo()
 
-
-def _run_resume_builder(gen_content: dict, job: dict) -> dict:
-    from jobs.agents import build_resume_builder
-    from jobs.tasks import build_resume_task
-
-    agent = build_resume_builder(deepseek_llm)
-    task = build_resume_task(agent, gen_content, job)
-    crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
-    result = crew.kickoff()
-
-    raw = result.raw if hasattr(result, "raw") else str(result)
-    raw = re.sub(r"^```(?:json)?\n?", "", raw.strip())
-    raw = re.sub(r"\n?```$", "", raw.strip())
-    try:
-        return json.loads(raw)
-    except Exception:
-        logger.error("[crew] resume builder returned non-JSON")
-        return {}
-
-
-def _run_cover_letter_writer(gen_content: dict, job: dict, company_info: CompanyInfo) -> str:
-    from jobs.agents import build_cover_letter_writer
-    from jobs.tasks import build_cover_letter_task
-
-    agent = build_cover_letter_writer(deepseek_llm)
-    task = build_cover_letter_task(agent, gen_content, job, company_info.model_dump())
-    crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
-    result = crew.kickoff()
-    return result.raw if hasattr(result, "raw") else str(result)
 
 
 def _run_project_advisor(gen_content: dict, job: dict) -> ProjectSuggestions:
@@ -284,77 +253,71 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         matched_ids = {r["job_id"] for r in (existing.data or [])}
         new_ids = [jid for jid in job_ids if jid not in matched_ids]
 
-        # ── Agents 2–6 per job ────────────────────────────────────────────────
-        processed = 0
-        agent_names = [
-            "Agent 2 — Profile Matcher",
-            "Agent 3 — Company Researcher",
-            "Agent 4 — Resume Builder",
-            "Agent 5 — Cover Letter Writer",
-            "Agent 6 — Project Advisor",
-        ]
+        if not new_ids:
+            _finish_run(run_id)
+            logger.info(f"[jobs_crew] no new jobs to process for user={user_id}")
+            return
 
+        # ── Pass 1: Agent 2 scores ALL new jobs ──────────────────────────────
+        # Score every new job first, then pick top `limit` by match_score.
+        # This ensures we only build resumes/cover letters for the best matches.
+        progress["current_step"] = 2
+        progress["current_agent"] = f"Agent 2 — Scoring {len(new_ids)} jobs"
+        progress["completed_agents"].append("Agent 1 — Job Searcher")
+        _update_progress(run_id, progress)
+
+        scored = []
         for job_id in new_ids:
-            if processed >= limit:
-                break
-
             job = _fetch_job(job_id)
             if not job:
                 continue
+            try:
+                match_result = _run_matcher(gen_content, ctc, job)
+                scored.append((job_id, job, match_result))
+                logger.info(f"[jobs_crew] scored job={job_id} '{job['title']}' score={match_result.match_score:.1f}")
+            except Exception as e:
+                logger.error(f"[jobs_crew] matcher failed job={job_id}: {e}", exc_info=True)
 
-            logger.info(f"[jobs_crew] processing job={job_id} '{job['title']}' @ '{job['company']}'")
+        # Sort descending by match_score, take top `limit`
+        scored.sort(key=lambda x: x[2].match_score, reverse=True)
+        top_jobs = scored[:limit]
+
+        progress["completed_agents"].append("Agent 2 — Profile Matcher")
+        progress["jobs_found"] = len(scored)
+        _update_progress(run_id, progress)
+
+        logger.info(f"[jobs_crew] scored {len(scored)} jobs, processing top {len(top_jobs)}")
+
+        # ── Pass 2: Agents 3–4 on top `limit` jobs (company research + projects) ──
+        processed = 0
+        for job_id, job, match_result in top_jobs:
+            logger.info(f"[jobs_crew] processing job={job_id} '{job['title']}' @ '{job['company']}' score={match_result.match_score:.1f}")
 
             try:
-                # Agent 2
-                progress["current_step"] = 2
-                progress["current_agent"] = agent_names[0]
-                _update_progress(run_id, progress)
-                match_result = _run_matcher(gen_content, ctc, job)
-                progress["completed_agents"].append(agent_names[0])
-
                 # Agent 3
                 progress["current_step"] = 3
-                progress["current_agent"] = agent_names[1]
+                progress["current_agent"] = "Agent 3 — Company Researcher"
                 _update_progress(run_id, progress)
                 company_info = _run_company_researcher(job["company"])
-                progress["completed_agents"].append(agent_names[1])
 
                 # Agent 4
                 progress["current_step"] = 4
-                progress["current_agent"] = agent_names[2]
-                _update_progress(run_id, progress)
-                resume_json = _run_resume_builder(gen_content, job)
-                progress["completed_agents"].append(agent_names[2])
-
-                # Agent 5
-                progress["current_step"] = 5
-                progress["current_agent"] = agent_names[3]
-                _update_progress(run_id, progress)
-                cover_letter = _run_cover_letter_writer(gen_content, job, company_info)
-                progress["completed_agents"].append(agent_names[3])
-
-                # Agent 6
-                progress["current_step"] = 6
-                progress["current_agent"] = agent_names[4]
+                progress["current_agent"] = "Agent 4 — Project Advisor"
                 _update_progress(run_id, progress)
                 project_suggestions = _run_project_advisor(gen_content, job)
-                progress["completed_agents"].append(agent_names[4])
 
                 _save_match(
                     user_id=user_id,
                     job_id=job_id,
                     match_result=match_result,
                     company_info=company_info,
-                    resume_json=resume_json,
-                    cover_letter=cover_letter,
                     project_suggestions=project_suggestions,
                 )
 
                 processed += 1
                 progress["jobs_processed"] = processed
-                progress["current_step"] = 7
-                progress["current_agent"] = f"Completed job {processed}/{min(limit, len(new_ids))}"
-                # Reset completed_agents for next job
+                progress["current_step"] = 5
+                progress["current_agent"] = f"Completed job {processed}/{len(top_jobs)}"
                 progress["completed_agents"] = []
                 _update_progress(run_id, progress)
 
@@ -370,3 +333,96 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
     except Exception as e:
         logger.error(f"[jobs_crew] fatal error user={user_id}: {e}", exc_info=True)
         _fail_run(run_id, str(e))
+
+
+# ── On-demand resume builder ──────────────────────────────────────────────────
+
+def build_resume_for_match(user_id: str, match_id: str) -> dict:
+    """
+    Build + validate a tailored resume for a specific matched job.
+    Called on demand when user clicks 'Build my resume'.
+    Returns the resume JSON and persists it to user_matched_jobs.
+    """
+    from jobs.agents import build_resume_builder, build_resume_validator
+    from jobs.tasks import build_resume_task, build_resume_validation_task
+
+    ctx = _load_user_context(user_id)
+    if not ctx:
+        raise ValueError("No portfolio or profile found")
+
+    match = supabase_admin.table("user_matched_jobs").select("job_id").eq("id", match_id).eq("user_id", user_id).execute()
+    if not match.data:
+        raise ValueError("Match not found")
+
+    job = _fetch_job(match.data[0]["job_id"])
+    if not job:
+        raise ValueError("Job listing not found")
+
+    gen_content = ctx["gen_content"]
+
+    # Agent: Resume Builder
+    builder = build_resume_builder(deepseek_llm)
+    build_task = build_resume_task(builder, gen_content, job)
+    build_result = Crew(agents=[builder], tasks=[build_task], process=Process.sequential, verbose=False).kickoff()
+
+    raw = build_result.raw if hasattr(build_result, "raw") else str(build_result)
+    raw = re.sub(r"^```(?:json)?\n?", "", raw.strip())
+    raw = re.sub(r"\n?```$", "", raw.strip())
+    try:
+        resume_json = json.loads(raw)
+    except Exception:
+        logger.error("[build_resume] builder returned non-JSON, raw=%s", raw[:300])
+        raise ValueError("Resume builder returned invalid JSON")
+
+    # Agent: Validator — cross-checks against gen_content, fixes issues
+    validator = build_resume_validator(deepseek_llm)
+    validate_task = build_resume_validation_task(validator, gen_content, job, resume_json)
+    validate_result = Crew(agents=[validator], tasks=[validate_task], process=Process.sequential, verbose=False).kickoff()
+
+    val_raw = validate_result.raw if hasattr(validate_result, "raw") else str(validate_result)
+    val_raw = re.sub(r"^```(?:json)?\n?", "", val_raw.strip())
+    val_raw = re.sub(r"\n?```$", "", val_raw.strip())
+    try:
+        validated_json = json.loads(val_raw)
+    except Exception:
+        logger.warning("[build_resume] validator returned non-JSON, using builder output")
+        validated_json = resume_json
+
+    supabase_admin.table("user_matched_jobs").update({"resume_json": validated_json}).eq("id", match_id).execute()
+    logger.info(f"[build_resume] saved resume match_id={match_id}")
+    return validated_json
+
+
+# ── On-demand cover letter writer ─────────────────────────────────────────────
+
+def build_cover_for_match(user_id: str, match_id: str) -> str:
+    """
+    Build a tailored cover letter for a specific matched job.
+    Called on demand when user clicks 'Build my cover letter'.
+    Returns the cover letter text and persists it to user_matched_jobs.
+    """
+    from jobs.agents import build_cover_letter_writer
+    from jobs.tasks import build_cover_letter_task
+
+    ctx = _load_user_context(user_id)
+    if not ctx:
+        raise ValueError("No portfolio or profile found")
+
+    match = supabase_admin.table("user_matched_jobs").select("job_id, company_info").eq("id", match_id).eq("user_id", user_id).execute()
+    if not match.data:
+        raise ValueError("Match not found")
+
+    job = _fetch_job(match.data[0]["job_id"])
+    if not job:
+        raise ValueError("Job listing not found")
+
+    company_info = CompanyInfo(**(match.data[0].get("company_info") or {}))
+
+    agent = build_cover_letter_writer(deepseek_llm)
+    task = build_cover_letter_task(agent, ctx["gen_content"], job, company_info.model_dump())
+    result = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False).kickoff()
+    cover_letter = result.raw if hasattr(result, "raw") else str(result)
+
+    supabase_admin.table("user_matched_jobs").update({"cover_letter": cover_letter}).eq("id", match_id).execute()
+    logger.info(f"[build_cover] saved cover letter match_id={match_id}")
+    return cover_letter

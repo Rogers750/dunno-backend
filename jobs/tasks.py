@@ -137,38 +137,36 @@ Return ONLY a JSON object matching this schema:
 def build_resume_task(agent: Agent, gen_content: dict, job: dict) -> Task:
     return Task(
         description=f"""
-Generate a tailored resume JSON for this specific job application.
-Your goal is to make this candidate look like the ideal hire for this exact role.
+Generate a complete, tailored resume JSON for this specific job application.
+Your goal: make this candidate look like the perfect hire for this exact role.
 
-## Source Portfolio (everything you have to work with)
-{json.dumps(gen_content, indent=2)[:3000]}
+## Source Portfolio — use ALL of this, miss nothing
+{json.dumps(gen_content, indent=2)[:6000]}
 
 ## Target Job
 Title: {job.get('title')}
 Company: {job.get('company')}
-Description: {(job.get('description') or '')[:2000]}
+Description: {(job.get('description') or '')[:3000]}
 
 ## What you MUST do
-- Read the job description carefully. Extract the exact skills, keywords, and responsibilities they care about.
-- Rewrite basics.summary to speak directly to this role — use the job's language, mirror their priorities, position the candidate as the answer to their problem.
-- Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and framing from the JD. Make every bullet feel like it was written for this role.
-- Reorder skills to put the ones this job cares about first.
-- Pick the 2-3 most relevant projects and rewrite their highlights to tie directly to what this job needs.
-- Use subjective, role-appropriate framing freely: leadership, ownership, cross-functional collaboration, scale, impact — as long as it's grounded in the candidate's real experience.
-- Mirror the seniority tone of the job (staff vs senior vs lead — match their language).
+1. Include EVERY experience entry from the source portfolio — do not drop any role.
+2. Include ALL social links (linkedin, github, twitter, medium, website, etc.) from personal/social.
+3. Rewrite basics.summary (4-5 sentences) to speak directly to this role — use the job's exact language, mirror their priorities, position the candidate as the answer to their specific problem.
+4. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and framing from the JD. Every bullet must feel written for this role.
+5. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
+6. Pick 2-3 most relevant projects. Rewrite highlights to tie directly to the job needs.
+7. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
+8. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
+9. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
 
-## Hard rules
-- NEVER add a technical skill, tool, or technology the candidate has not worked with.
-- NEVER invent metrics, companies, or roles that don't exist in the source portfolio.
+## Hard rules — never break these
+- NEVER add a technology, tool, or framework the candidate hasn't used.
+- NEVER invent metrics, company names, or roles.
 - NEVER fabricate certifications or education.
-- Everything subjective (framing, emphasis, tone) is fair game. Only facts are locked.
+- NEVER leave experience, skills, or education arrays empty.
+- Include optional sections (certifications, achievements, languages) ONLY if present in source.
 
-- Populate all sortDate fields as YYYY-MM
-- Set endSortDate to "9999-12" for current/present positions
-- Include optional sections (certifications, publications, achievements, languages)
-  ONLY if they exist in the source portfolio
-
-Return ONLY the resume JSON, no other text. Schema:
+Return ONLY the resume JSON. No markdown, no explanation. Schema:
 {{
   "basics": {{
     "name": "", "title": "", "email": "", "phone": "", "location": "",
@@ -286,6 +284,46 @@ Return ONLY a JSON object:
         expected_output="A JSON object with exactly 3 project suggestions.",
         agent=agent,
         output_pydantic=ProjectSuggestions,
+    )
+
+
+def build_resume_validation_task(agent: Agent, gen_content: dict, job: dict, resume_json: dict) -> Task:
+    source_skills = []
+    for group in gen_content.get("skills", []):
+        source_skills.extend(group.get("items", []) if isinstance(group, dict) else [])
+    source_companies = [e.get("company", "") for e in gen_content.get("experience", [])]
+    source_projects = [p.get("name", "") for p in gen_content.get("projects", [])]
+
+    return Task(
+        description=f"""
+Audit this generated resume JSON and fix any issues. Return a corrected, complete resume JSON.
+
+## Original Portfolio (source of truth)
+Experience companies: {source_companies}
+Projects: {source_projects}
+All known skills/tools: {source_skills}
+Social/personal: {json.dumps(gen_content.get('personal', {}), indent=2)}
+
+## Target Job
+Title: {job.get('title')}
+Company: {job.get('company')}
+
+## Generated Resume to Audit
+{json.dumps(resume_json, indent=2)[:5000]}
+
+## What to check and fix
+1. COMPLETENESS — every experience from the source must appear. If any role is missing, add it back from the original portfolio.
+2. NO INVENTED TECH — check every skill, tool, and technology in the resume against the known skills list. Remove any that don't appear in the source.
+3. NO EMPTY ARRAYS — experience bullets, skills lists, and project highlights must not be empty. Populate from source if needed.
+4. SOCIAL LINKS — all links (linkedin, github, twitter, medium, portfolio, website) from the original personal section must be in basics.
+5. SUMMARY — must be specific to the target job, not generic. If it's generic, rewrite it.
+6. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
+7. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered by JD relevance.
+
+Fix every issue you find. Return ONLY the corrected resume JSON. No explanation, no markdown.
+""",
+        expected_output="A complete, validated resume JSON with all issues fixed.",
+        agent=agent,
     )
 
 

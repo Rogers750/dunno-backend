@@ -88,6 +88,27 @@ def build_resume_builder(llm: LLM) -> Agent:
     )
 
 
+def build_resume_validator(llm: LLM) -> Agent:
+    return Agent(
+        role="Senior Resume Quality Auditor",
+        goal=(
+            "Audit a generated resume JSON against the candidate's original portfolio. "
+            "Fix any missing sections, empty fields, invented tech, or poor JD alignment. "
+            "Return a corrected, complete resume JSON."
+        ),
+        backstory=(
+            "You are a meticulous resume reviewer who ensures every resume is factually "
+            "accurate, complete, and maximally tailored to the target job. You never let "
+            "a resume go out with missing experience entries, empty bullets, invented tools, "
+            "or a generic summary. You fix issues directly and return the corrected JSON."
+        ),
+        tools=[],
+        llm=llm,
+        allow_delegation=False,
+        verbose=False,
+    )
+
+
 def build_cover_letter_writer(llm: LLM) -> Agent:
     return Agent(
         role="Senior Career Coach and Writer",
