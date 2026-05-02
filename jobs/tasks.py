@@ -143,6 +143,15 @@ Your goal: make this candidate look like the perfect hire for this exact role.
 ## Source Portfolio — use ALL of this, miss nothing
 {json.dumps(gen_content, indent=2)[:6000]}
 
+## Certifications (copy exactly into resume)
+{json.dumps(gen_content.get('certifications', []))}
+
+## Publications (copy exactly into resume)
+{json.dumps(gen_content.get('publications', []))}
+
+## Achievements (copy exactly into resume)
+{json.dumps(gen_content.get('achievements', []))}
+
 ## Target Job
 Title: {job.get('title')}
 Company: {job.get('company')}
@@ -164,7 +173,7 @@ Description: {(job.get('description') or '')[:3000]}
 - NEVER invent metrics, company names, or roles.
 - NEVER fabricate certifications or education.
 - NEVER leave experience, skills, or education arrays empty.
-- Include optional sections (certifications, achievements, languages) ONLY if present in source.
+- certifications, publications, achievements: copy exactly from source portfolio if present. If source has none, return empty array []. ALWAYS include these keys.
 
 Return ONLY the resume JSON. No markdown, no explanation. Schema:
 {{
@@ -190,9 +199,9 @@ Return ONLY the resume JSON. No markdown, no explanation. Schema:
     "startDate": "", "endDate": "", "sortDate": "YYYY-MM", "endSortDate": "YYYY-MM",
     "highlights": []
   }}],
-  "certifications": [],
-  "publications": [],
-  "achievements": [],
+  "certifications": [{{ "name": "", "issuer": "", "year": "" }}],
+  "publications": [{{ "title": "", "url": "", "year": "" }}],
+  "achievements": ["string"],
   "languages": []
 }}
 """,
