@@ -16,13 +16,21 @@ logger = logging.getLogger(__name__)
 # These point to commonly used public actors on Apify. Verify/update IDs in
 # your Apify console if a different actor version is preferred.
 _LINKEDIN_ACTOR  = os.getenv("APIFY_LINKEDIN_ACTOR",  "curious_coder/linkedin-jobs-scraper")
-_NAUKRI_ACTOR    = os.getenv("APIFY_NAUKRI_ACTOR",    "bibhu/naukri-jobs-scraper")
-_WELLFOUND_ACTOR = os.getenv("APIFY_WELLFOUND_ACTOR", "bebity/wellfound-jobs-scraper")
-_INSTAHYRE_ACTOR = os.getenv("APIFY_INSTAHYRE_ACTOR", "dhrumil/instahyre-jobs-scraper")
+_NAUKRI_ACTOR    = os.getenv("APIFY_NAUKRI_ACTOR",    "stealth_mode/naukri-jobs-search-scraper")
+_GOOGLE_JOBS_ACTOR = os.getenv("APIFY_GOOGLE_JOBS_ACTOR", "bebity/google-jobs-scraper")
 _GLASSDOOR_ACTOR = os.getenv("APIFY_GLASSDOOR_ACTOR", "bebity/glassdoor-companies-scraper")
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
+
+def _pick(item: dict, keys: list[str]) -> Optional[str]:
+    """Try multiple field name candidates; return first non-empty value found."""
+    for k in keys:
+        v = item.get(k)
+        if v:
+            return str(v)
+    return None
+
 
 def _compute_job_hash(company: str, title: str, url: str) -> str:
     raw = company.lower() + title.lower() + url
@@ -41,7 +49,9 @@ def _upsert_job(
     expires_at: Optional[str] = None,
 ) -> Optional[str]:
     """Insert job into job_listings. On duplicate job_hash → return existing id."""
-    if not title or not company or not url:
+    missing = [f for f, v in [("title", title), ("company", company), ("url", url)] if not v]
+    if missing:
+        logger.warning(f"[_upsert_job] skipped on {platform} — missing fields: {missing} | title={title!r} company={company!r} url={url!r}")
         return None
 
     job_hash = _compute_job_hash(company, title, url)
@@ -110,17 +120,19 @@ class LinkedInJobsTool(BaseTool):
                 timeout_secs=300,
             )
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+            if items:
+                logger.info(f"[linkedin_tool] {len(items)} items scraped. first item: {dict(list(items[0].items())[:10])}")
             job_ids = []
             for item in items:
                 jid = _upsert_job(
-                    title=item.get("title", ""),
-                    company=item.get("companyName", item.get("company", "")),
-                    url=item.get("jobUrl", item.get("url", "")),
+                    title=_pick(item, ["title", "jobTitle", "position"]),
+                    company=_pick(item, ["companyName", "company", "employer"]),
+                    url=_pick(item, ["link", "applyUrl", "jobUrl", "url", "jobLink"]),
                     platform="linkedin",
-                    location=item.get("location"),
-                    description=item.get("description"),
-                    salary_range=item.get("salary"),
-                    posted_at=item.get("postedAt"),
+                    location=_pick(item, ["location", "jobLocation"]),
+                    description=_pick(item, ["descriptionText", "description", "descriptionHtml"]),
+                    salary_range=_pick(item, ["salaryInfo", "salary", "salaryRange", "compensation"]),
+                    posted_at=_pick(item, ["postedAt", "postedDate", "datePosted"]),
                 )
                 if jid:
                     job_ids.append(jid)
@@ -145,26 +157,37 @@ class NaukriJobsTool(BaseTool):
     def _run(self, search_query: str) -> str:
         try:
             client = _apify_client()
+            # stealth_mode actor takes Naukri search page URLs
+            slug = search_query.lower().replace(" ", "-")
+            search_url = f"https://www.naukri.com/{slug}-jobs-in-india"
             run = client.actor(_NAUKRI_ACTOR).call(
                 run_input={
-                    "keyword": search_query,
-                    "location": "India",
-                    "maxJobs": 25,
+                    "urls": [search_url],
+                    "max_items_per_url": 25,
                 },
                 timeout_secs=180,
             )
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+            if items:
+                logger.info(f"[naukri_tool] {len(items)} items scraped. first item: {dict(list(items[0].items())[:10])}")
             job_ids = []
             for item in items:
+                # salary_detail is a nested object: {minimum_salary, maximum_salary}
+                salary_detail = item.get("salary_detail") or {}
+                salary_str = None
+                if salary_detail.get("minimum_salary") or salary_detail.get("maximum_salary"):
+                    lo = salary_detail.get("minimum_salary", "")
+                    hi = salary_detail.get("maximum_salary", "")
+                    salary_str = f"{lo}-{hi} {salary_detail.get('currency', 'INR')}".strip("- ")
                 jid = _upsert_job(
-                    title=item.get("title", ""),
-                    company=item.get("company", ""),
-                    url=item.get("url", item.get("jobUrl", "")),
+                    title=_pick(item, ["title", "jobTitle", "position"]),
+                    company=_pick(item, ["company_name", "company", "companyName"]),
+                    url=_pick(item, ["jd_url", "static_url", "url", "jobUrl", "link"]),
                     platform="naukri",
-                    location=item.get("location"),
-                    description=item.get("description"),
-                    salary_range=item.get("salary", item.get("salaryRange")),
-                    posted_at=item.get("postedDate"),
+                    location=_pick(item, ["location", "jobLocation"]),
+                    description=_pick(item, ["job_description", "description", "descriptionText"]),
+                    salary_range=salary_str or _pick(item, ["salary", "salaryRange"]),
+                    posted_at=_pick(item, ["created_date", "postedDate", "postedAt"]),
                 )
                 if jid:
                     job_ids.append(jid)
@@ -175,90 +198,56 @@ class NaukriJobsTool(BaseTool):
             return f"Naukri search failed: {str(e)}"
 
 
-# ── Wellfound Jobs Tool ───────────────────────────────────────────────────────
+# ── Google Jobs Tool (replaces Wellfound + Instahyre) ────────────────────────
 
-class WellfoundJobsTool(BaseTool):
-    name: str = "Wellfound Jobs Search"
+class GoogleJobsTool(BaseTool):
+    name: str = "Google Jobs Search"
     description: str = (
-        "Search Wellfound (formerly AngelList) for startup jobs matching a role/skill query. "
+        "Search Google Jobs for live job listings in India matching a role/skill query. "
+        "Covers jobs from all platforms (Naukri, LinkedIn, company sites, etc). "
         "Saves new jobs to the database and returns their IDs. "
-        "Input: job title + skills, e.g. 'Backend Engineer Python FastAPI'."
+        "Input: job title + key skills, e.g. 'Senior Data Engineer Spark India'."
     )
     args_schema: Type[BaseModel] = JobSearchInput
 
     def _run(self, search_query: str) -> str:
         try:
             client = _apify_client()
-            run = client.actor(_WELLFOUND_ACTOR).call(
+            run = client.actor(_GOOGLE_JOBS_ACTOR).call(
                 run_input={
                     "query": search_query,
-                    "maxResults": 25,
+                    "domain": "co.in",
+                    "location": "India",
+                    "maxRows": 25,
+                    "datePosted": "week",
                 },
                 timeout_secs=180,
             )
             items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+            if items:
+                logger.info(f"[google_jobs_tool] {len(items)} items scraped. first item: {dict(list(items[0].items())[:10])}")
             job_ids = []
             for item in items:
+                # links is a list of {url, source} dicts
+                links = item.get("links") or []
+                apply_url = links[0].get("url") if links else None
                 jid = _upsert_job(
-                    title=item.get("title", ""),
-                    company=item.get("company", item.get("companyName", "")),
-                    url=item.get("url", item.get("jobUrl", "")),
-                    platform="wellfound",
-                    location=item.get("location"),
-                    description=item.get("description"),
-                    salary_range=item.get("compensation", item.get("salary")),
-                    posted_at=item.get("postedAt"),
+                    title=_pick(item, ["jobTitle", "title", "position"]),
+                    company=_pick(item, ["companyName", "company", "employer"]),
+                    url=apply_url or _pick(item, ["url", "link"]),
+                    platform="google_jobs",
+                    location=_pick(item, ["location", "jobLocation"]),
+                    description=_pick(item, ["description", "descriptionText"]),
+                    salary_range=_pick(item, ["salary", "salaryRange", "salaryInfo"]),
+                    posted_at=_pick(item, ["publicationLapsTime", "postedAt", "datePosted"]),
                 )
                 if jid:
                     job_ids.append(jid)
-            logger.info(f"[wellfound_tool] saved {len(job_ids)} jobs")
-            return f"Wellfound: saved {len(job_ids)} jobs. IDs: {','.join(job_ids)}"
+            logger.info(f"[google_jobs_tool] saved {len(job_ids)} jobs")
+            return f"Google Jobs: saved {len(job_ids)} jobs. IDs: {','.join(job_ids)}"
         except Exception as e:
-            logger.error(f"[wellfound_tool] error: {e}")
-            return f"Wellfound search failed: {str(e)}"
-
-
-# ── Instahyre Jobs Tool ───────────────────────────────────────────────────────
-
-class InstahyrJobsTool(BaseTool):
-    name: str = "Instahyre Jobs Search"
-    description: str = (
-        "Search Instahyre for curated tech jobs in India matching a role/skill query. "
-        "Saves new jobs to the database and returns their IDs. "
-        "Input: job title + skills, e.g. 'Machine Learning Engineer PyTorch'."
-    )
-    args_schema: Type[BaseModel] = JobSearchInput
-
-    def _run(self, search_query: str) -> str:
-        try:
-            client = _apify_client()
-            run = client.actor(_INSTAHYRE_ACTOR).call(
-                run_input={
-                    "query": search_query,
-                    "maxResults": 25,
-                },
-                timeout_secs=180,
-            )
-            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-            job_ids = []
-            for item in items:
-                jid = _upsert_job(
-                    title=item.get("title", ""),
-                    company=item.get("company", ""),
-                    url=item.get("url", item.get("jobUrl", "")),
-                    platform="instahyre",
-                    location=item.get("location"),
-                    description=item.get("description"),
-                    salary_range=item.get("salary"),
-                    posted_at=item.get("postedAt"),
-                )
-                if jid:
-                    job_ids.append(jid)
-            logger.info(f"[instahyre_tool] saved {len(job_ids)} jobs")
-            return f"Instahyre: saved {len(job_ids)} jobs. IDs: {','.join(job_ids)}"
-        except Exception as e:
-            logger.error(f"[instahyre_tool] error: {e}")
-            return f"Instahyre search failed: {str(e)}"
+            logger.error(f"[google_jobs_tool] error: {e}")
+            return f"Google Jobs search failed: {str(e)}"
 
 
 # ── Glassdoor Company Tool ────────────────────────────────────────────────────

@@ -3,8 +3,7 @@ from crewai import Agent, LLM
 from jobs.tools import (
     LinkedInJobsTool,
     NaukriJobsTool,
-    WellfoundJobsTool,
-    InstahyrJobsTool,
+    GoogleJobsTool,
     GlassdoorTool,
 )
 
@@ -14,15 +13,15 @@ def build_job_searcher(llm: LLM) -> Agent:
         role="Senior Job Search Specialist",
         goal=(
             "Find and save the most relevant live job listings across LinkedIn, Naukri, "
-            "Wellfound, and Instahyre for a specific candidate profile. "
-            "Use all four platforms. Return all newly saved job IDs."
+            "and Google Jobs for a specific candidate profile. "
+            "Use all three platforms. Return all newly saved job IDs."
         ),
         backstory=(
             "You are an expert recruiter who knows how to search job boards efficiently. "
             "You understand how to translate a candidate's skills and target roles into "
             "effective search queries that surface the most relevant opportunities."
         ),
-        tools=[LinkedInJobsTool(), NaukriJobsTool(), WellfoundJobsTool(), InstahyrJobsTool()],
+        tools=[LinkedInJobsTool(), NaukriJobsTool(), GoogleJobsTool()],
         llm=llm,
         allow_delegation=False,
         verbose=False,
