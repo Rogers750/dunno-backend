@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 # These point to commonly used public actors on Apify. Verify/update IDs in
 # your Apify console if a different actor version is preferred.
 _LINKEDIN_ACTOR  = os.getenv("APIFY_LINKEDIN_ACTOR",  "curious_coder/linkedin-jobs-scraper")
-_NAUKRI_ACTOR    = os.getenv("APIFY_NAUKRI_ACTOR",    "stealth_mode/naukri-jobs-search-scraper")
 _GOOGLE_JOBS_ACTOR = os.getenv("APIFY_GOOGLE_JOBS_ACTOR", "bebity/google-jobs-scraper")
 _GLASSDOOR_ACTOR = os.getenv("APIFY_GLASSDOOR_ACTOR", "bebity/glassdoor-companies-scraper")
 
@@ -143,59 +142,6 @@ class LinkedInJobsTool(BaseTool):
             return f"LinkedIn search failed: {str(e)}"
 
 
-# ── Naukri Jobs Tool ──────────────────────────────────────────────────────────
-
-class NaukriJobsTool(BaseTool):
-    name: str = "Naukri Jobs Search"
-    description: str = (
-        "Search Naukri for live job listings in India matching a role/skill query. "
-        "Saves new jobs to the database and returns their IDs. "
-        "Input: job title + key skills, e.g. 'Data Engineer Kafka Python'."
-    )
-    args_schema: Type[BaseModel] = JobSearchInput
-
-    def _run(self, search_query: str) -> str:
-        try:
-            client = _apify_client()
-            # stealth_mode actor takes Naukri search page URLs
-            slug = search_query.lower().replace(" ", "-")
-            search_url = f"https://www.naukri.com/{slug}-jobs-in-india"
-            run = client.actor(_NAUKRI_ACTOR).call(
-                run_input={
-                    "urls": [search_url],
-                    "max_items_per_url": 25,
-                },
-                timeout_secs=180,
-            )
-            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-            if items:
-                logger.info(f"[naukri_tool] {len(items)} items scraped. first item: {dict(list(items[0].items())[:10])}")
-            job_ids = []
-            for item in items:
-                # salary_detail is a nested object: {minimum_salary, maximum_salary}
-                salary_detail = item.get("salary_detail") or {}
-                salary_str = None
-                if salary_detail.get("minimum_salary") or salary_detail.get("maximum_salary"):
-                    lo = salary_detail.get("minimum_salary", "")
-                    hi = salary_detail.get("maximum_salary", "")
-                    salary_str = f"{lo}-{hi} {salary_detail.get('currency', 'INR')}".strip("- ")
-                jid = _upsert_job(
-                    title=_pick(item, ["title", "jobTitle", "position"]),
-                    company=_pick(item, ["company_name", "company", "companyName"]),
-                    url=_pick(item, ["jd_url", "static_url", "url", "jobUrl", "link"]),
-                    platform="naukri",
-                    location=_pick(item, ["location", "jobLocation"]),
-                    description=_pick(item, ["job_description", "description", "descriptionText"]),
-                    salary_range=salary_str or _pick(item, ["salary", "salaryRange"]),
-                    posted_at=_pick(item, ["created_date", "postedDate", "postedAt"]),
-                )
-                if jid:
-                    job_ids.append(jid)
-            logger.info(f"[naukri_tool] saved {len(job_ids)} jobs")
-            return f"Naukri: saved {len(job_ids)} jobs. IDs: {','.join(job_ids)}"
-        except Exception as e:
-            logger.error(f"[naukri_tool] error: {e}")
-            return f"Naukri search failed: {str(e)}"
 
 
 # ── Google Jobs Tool (replaces Wellfound + Instahyre) ────────────────────────

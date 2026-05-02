@@ -106,6 +106,57 @@ def _fetch_job(job_id: str) -> Optional[dict]:
     return result.data[0] if result.data else None
 
 
+def _get_relevant_unmatched_from_db(
+    target_roles: list[str],
+    matched_ids: set,
+    min_count: int = 15,
+    days: int = 7,
+) -> list[str]:
+    """
+    Check job_listings for recent, role-relevant, unmatched jobs.
+    Returns IDs if >= min_count found, else empty list (triggers fresh scrape).
+    Filters:
+      - created within `days` days
+      - is_live = True
+      - title contains at least one target role keyword
+      - not already in user_matched_jobs
+    """
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    recent = (
+        supabase_admin.table("job_listings")
+        .select("id, title")
+        .eq("is_live", True)
+        .gte("created_at", cutoff)
+        .execute()
+    )
+
+    role_keywords = [r.lower().strip() for r in target_roles if r]
+    # also split multi-word roles into individual keywords for broader matching
+    # e.g. "Senior Data Engineer" → ["senior data engineer", "data engineer", "senior"]
+    expanded = set()
+    for role in role_keywords:
+        expanded.add(role)
+        parts = role.split()
+        if len(parts) > 1:
+            expanded.add(" ".join(parts[1:]))  # drop seniority prefix
+
+    candidates = []
+    for row in (recent.data or []):
+        if row["id"] in matched_ids:
+            continue
+        title_lower = (row.get("title") or "").lower()
+        if any(kw in title_lower for kw in expanded):
+            candidates.append(row["id"])
+
+    logger.info(
+        f"[crew] DB pool check: {len(candidates)} relevant unmatched jobs "
+        f"(need {min_count} to skip scrape)"
+    )
+    return candidates if len(candidates) >= min_count else []
+
+
 def _save_match(
     user_id: str,
     job_id: str,
@@ -228,7 +279,7 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         # ── Agent 1: Job Search ───────────────────────────────────────────────
         progress = {
             "current_step": 1,
-            "total_steps": 7,
+            "total_steps": 5,
             "current_agent": "Agent 1 — Job Searcher",
             "completed_agents": [],
             "jobs_found": 0,
@@ -236,22 +287,27 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         }
         _update_progress(run_id, progress)
 
-        job_ids = _run_job_search(target_roles, gen_content)
-
-        progress["completed_agents"].append("Agent 1 — Job Searcher")
-        progress["jobs_found"] = len(job_ids)
-        _update_progress(run_id, progress)
-
-        logger.info(f"[jobs_crew] agent1 found {len(job_ids)} jobs")
-
-        if not job_ids:
-            _fail_run(run_id, "No jobs found across all platforms")
-            return
-
-        # Filter already-matched
+        # Check already-matched jobs first (needed for both paths below)
         existing = supabase_admin.table("user_matched_jobs").select("job_id").eq("user_id", user_id).execute()
         matched_ids = {r["job_id"] for r in (existing.data or [])}
-        new_ids = [jid for jid in job_ids if jid not in matched_ids]
+
+        # Try DB first — skip Apify if enough relevant recent jobs already exist
+        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids)
+        if db_ids:
+            new_ids = db_ids
+            logger.info(f"[jobs_crew] skipping Apify — using {len(new_ids)} jobs from DB")
+            progress["current_agent"] = "Agent 1 — Using cached jobs"
+        else:
+            logger.info(f"[jobs_crew] DB pool insufficient — running Apify scrapers")
+            job_ids = _run_job_search(target_roles, gen_content)
+            if not job_ids:
+                _fail_run(run_id, "No jobs found across all platforms")
+                return
+            new_ids = [jid for jid in job_ids if jid not in matched_ids]
+
+        progress["completed_agents"].append("Agent 1 — Job Searcher")
+        progress["jobs_found"] = len(new_ids)
+        _update_progress(run_id, progress)
 
         if not new_ids:
             _finish_run(run_id)
