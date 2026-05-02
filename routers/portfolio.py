@@ -287,7 +287,7 @@ async def _fetch_github_repo(api_url: str) -> dict:
 
 @router.post("/generate")
 async def generate_portfolio(
-    payload: GenerateRequest,
+    payload: GenerateRequest = GenerateRequest(),
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     """
