@@ -71,6 +71,11 @@ class TemplatePatchRequest(BaseModel):
     theme_category: Optional[str] = None
 
 
+class PortfolioPatchRequest(BaseModel):
+    target_roles: Optional[list[str]] = None
+    total_years_experience: Optional[float] = None
+
+
 class PublishRequest(BaseModel):
     published: bool
 
@@ -195,11 +200,14 @@ SCHEMA (return exactly this structure):
       "duration": "2016 – 2020"
     }
   ],
-  "target_roles": ["Senior Data Engineer", "MLOps Engineer"]
+  "target_roles": ["Senior Data Engineer", "MLOps Engineer"],
+  "total_years_experience": 4.5
 }
 
 - target_roles: infer 2-4 most suitable job titles from the resume, experience level, and skills.
   If target_roles are explicitly provided in the prompt, use those instead.
+- total_years_experience: calculate total professional experience in years as a float
+  by summing all experience durations. E.g. 4.5 means 4 years 6 months.
 Do not deviate from this schema under any circumstances."""
 
 
@@ -317,6 +325,7 @@ async def generate_portfolio(
         "projects": [],
         "education": [],
         "target_roles": [],
+        "total_years_experience": 0,
     }
     for key, default in EMPTY_DEFAULTS.items():
         if key not in generated_content:
@@ -359,6 +368,41 @@ async def generate_portfolio(
         "repos_used": len(github_repos),
         "target_roles": target_roles,
     }
+
+
+@router.patch("/me")
+async def patch_portfolio(
+    payload: PortfolioPatchRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Update target_roles and/or total_years_experience. Updates both the dedicated
+    column and the corresponding key inside generated_content."""
+    user = _get_user(credentials)
+    user_client = _get_user_client(credentials)
+
+    row = user_client.table("portfolios").select("id, generated_content").eq("user_id", user.id).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="No portfolio found. Run /portfolio/generate first.")
+
+    portfolio_id = row.data[0]["id"]
+    gen_content = row.data[0].get("generated_content") or {}
+
+    column_update = {}
+    if payload.target_roles is not None:
+        column_update["target_roles"] = payload.target_roles
+        gen_content["target_roles"] = payload.target_roles
+    if payload.total_years_experience is not None:
+        column_update["total_years_experience"] = payload.total_years_experience
+        gen_content["total_years_experience"] = payload.total_years_experience
+
+    if not column_update:
+        raise HTTPException(status_code=400, detail="Nothing to update. Provide target_roles or total_years_experience.")
+
+    column_update["generated_content"] = gen_content
+    user_client.table("portfolios").update(column_update).eq("id", portfolio_id).execute()
+
+    logger.info(f"[portfolio/me PATCH] user={user.id} updated={list(column_update.keys())}")
+    return {"portfolio_id": portfolio_id, "updated": list(column_update.keys())}
 
 
 @router.get("/me")
@@ -409,7 +453,7 @@ async def patch_section(
     return {"portfolio_id": portfolio_id, "section": payload.section, "updated": True}
 
 
-@router.patch("/template")
+@router.patch("/me/template")
 async def save_template(
     payload: TemplatePatchRequest,
     credentials: HTTPAuthorizationCredentials = Depends(security),
