@@ -17,8 +17,8 @@ def build_job_search_task(agent: Agent, target_roles: list, gen_content: dict) -
 
     return Task(
         description=f"""
-Search all four job platforms (LinkedIn, Naukri, Wellfound, Instahyre) for live job
-listings that match this candidate's profile.
+Search three job platforms (LinkedIn, Naukri, Google Jobs) for live job listings
+that match this candidate's profile.
 
 ## Candidate Profile
 Target Roles: {roles_str}
@@ -26,15 +26,17 @@ Top Skills: {top_skills}
 Experience: {years_hint}
 
 ## Instructions
-1. For each platform, construct a focused search query combining the target role and
-   top skills. Use all four tools — do not skip any platform.
-2. Each tool handles deduplication and saves jobs to the database automatically.
-3. Collect all job IDs returned by each tool.
-4. Return a final summary: how many jobs were saved per platform, and the complete
-   comma-separated list of all job IDs.
+You have three tools available: LinkedIn Jobs Search, Naukri Jobs Search, Google Jobs Search.
+You MUST call all three tools. Do not skip any.
+
+1. Call "LinkedIn Jobs Search" with a query combining the target role and top skills.
+2. Call "Naukri Jobs Search" with a query combining the target role and top skills.
+3. Call "Google Jobs Search" with a query combining the target role and top skills.
+4. Each tool saves jobs to the database and returns UUIDs. Collect all UUIDs.
+5. Return the summary and all UUIDs.
 
 Return format:
-LinkedIn: N jobs | Naukri: N jobs | Wellfound: N jobs | Instahyre: N jobs
+LinkedIn: N jobs | Naukri: N jobs | Google Jobs: N jobs
 All job IDs: <uuid1>, <uuid2>, ...
 """,
         expected_output=(

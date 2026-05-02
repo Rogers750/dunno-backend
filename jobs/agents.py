@@ -22,6 +22,7 @@ def build_job_searcher(llm: LLM) -> Agent:
             "effective search queries that surface the most relevant opportunities."
         ),
         tools=[LinkedInJobsTool(), NaukriJobsTool(), GoogleJobsTool()],
+        max_iter=9,
         llm=llm,
         allow_delegation=False,
         verbose=False,
