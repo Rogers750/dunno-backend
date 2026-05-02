@@ -2,7 +2,6 @@ from crewai import Agent, LLM
 
 from jobs.tools import (
     LinkedInJobsTool,
-    NaukriJobsTool,
     GoogleJobsTool,
     GlassdoorTool,
 )
@@ -12,16 +11,16 @@ def build_job_searcher(llm: LLM) -> Agent:
     return Agent(
         role="Senior Job Search Specialist",
         goal=(
-            "Find and save the most relevant live job listings across LinkedIn, Naukri, "
+            "Find and save the most relevant live job listings across LinkedIn "
             "and Google Jobs for a specific candidate profile. "
-            "Use all three platforms. Return all newly saved job IDs."
+            "Use both platforms. Return all newly saved job IDs."
         ),
         backstory=(
             "You are an expert recruiter who knows how to search job boards efficiently. "
             "You understand how to translate a candidate's skills and target roles into "
             "effective search queries that surface the most relevant opportunities."
         ),
-        tools=[LinkedInJobsTool(), NaukriJobsTool(), GoogleJobsTool()],
+        tools=[LinkedInJobsTool(), GoogleJobsTool()],
         max_iter=9,
         llm=llm,
         allow_delegation=False,
@@ -131,20 +130,3 @@ def build_project_advisor(llm: LLM) -> Agent:
     )
 
 
-def build_pdf_renderer(llm: LLM) -> Agent:
-    return Agent(
-        role="Resume PDF Renderer",
-        goal=(
-            "Convert a resume JSON into a clean, ATS-friendly PDF. "
-            "Output valid HTML that will be rendered to PDF."
-        ),
-        backstory=(
-            "You specialise in converting structured resume data into clean, "
-            "well-formatted HTML suitable for PDF export. Your output is always "
-            "minimal, ATS-friendly, and uses standard fonts and black text on white."
-        ),
-        tools=[],
-        llm=llm,
-        allow_delegation=False,
-        verbose=False,
-    )

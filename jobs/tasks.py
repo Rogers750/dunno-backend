@@ -17,7 +17,7 @@ def build_job_search_task(agent: Agent, target_roles: list, gen_content: dict) -
 
     return Task(
         description=f"""
-Search three job platforms (LinkedIn, Naukri, Google Jobs) for live job listings
+Search two job platforms (LinkedIn and Google Jobs) for live job listings
 that match this candidate's profile.
 
 ## Candidate Profile
@@ -26,17 +26,16 @@ Top Skills: {top_skills}
 Experience: {years_hint}
 
 ## Instructions
-You have three tools available: LinkedIn Jobs Search, Naukri Jobs Search, Google Jobs Search.
-You MUST call all three tools. Do not skip any.
+You have two tools available: LinkedIn Jobs Search, Google Jobs Search.
+You MUST call both tools. Do not skip any.
 
 1. Call "LinkedIn Jobs Search" with a query combining the target role and top skills.
-2. Call "Naukri Jobs Search" with a query combining the target role and top skills.
-3. Call "Google Jobs Search" with a query combining the target role and top skills.
-4. Each tool saves jobs to the database and returns UUIDs. Collect all UUIDs.
-5. Return the summary and all UUIDs.
+2. Call "Google Jobs Search" with a query combining the target role and top skills.
+3. Each tool saves jobs to the database and returns UUIDs. Collect all UUIDs.
+4. Return the summary and all UUIDs.
 
 Return format:
-LinkedIn: N jobs | Naukri: N jobs | Google Jobs: N jobs
+LinkedIn: N jobs | Google Jobs: N jobs
 All job IDs: <uuid1>, <uuid2>, ...
 """,
         expected_output=(
@@ -139,8 +138,9 @@ def build_resume_task(agent: Agent, gen_content: dict, job: dict) -> Task:
     return Task(
         description=f"""
 Generate a tailored resume JSON for this specific job application.
+Your goal is to make this candidate look like the ideal hire for this exact role.
 
-## Source Portfolio
+## Source Portfolio (everything you have to work with)
 {json.dumps(gen_content, indent=2)[:3000]}
 
 ## Target Job
@@ -148,16 +148,25 @@ Title: {job.get('title')}
 Company: {job.get('company')}
 Description: {(job.get('description') or '')[:2000]}
 
-## Instructions
-- Reorder experience bullets to lead with the most relevant achievements for this role
-- Reorder/filter skills to highlight what this job description emphasises
-- Select 2-3 most relevant projects; rewrite highlights to tie to the job
-- Rewrite basics.summary (3-4 sentences) specifically for this role and company
+## What you MUST do
+- Read the job description carefully. Extract the exact skills, keywords, and responsibilities they care about.
+- Rewrite basics.summary to speak directly to this role — use the job's language, mirror their priorities, position the candidate as the answer to their problem.
+- Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and framing from the JD. Make every bullet feel like it was written for this role.
+- Reorder skills to put the ones this job cares about first.
+- Pick the 2-3 most relevant projects and rewrite their highlights to tie directly to what this job needs.
+- Use subjective, role-appropriate framing freely: leadership, ownership, cross-functional collaboration, scale, impact — as long as it's grounded in the candidate's real experience.
+- Mirror the seniority tone of the job (staff vs senior vs lead — match their language).
+
+## Hard rules
+- NEVER add a technical skill, tool, or technology the candidate has not worked with.
+- NEVER invent metrics, companies, or roles that don't exist in the source portfolio.
+- NEVER fabricate certifications or education.
+- Everything subjective (framing, emphasis, tone) is fair game. Only facts are locked.
+
 - Populate all sortDate fields as YYYY-MM
 - Set endSortDate to "9999-12" for current/present positions
 - Include optional sections (certifications, publications, achievements, languages)
   ONLY if they exist in the source portfolio
-- Do NOT invent experience, metrics, or skills not present in the source portfolio
 
 Return ONLY the resume JSON, no other text. Schema:
 {{
@@ -280,26 +289,3 @@ Return ONLY a JSON object:
     )
 
 
-def build_pdf_render_task(agent: Agent, resume_json: dict) -> Task:
-    return Task(
-        description=f"""
-Convert this resume JSON to ATS-friendly HTML suitable for PDF rendering.
-
-## Resume Data
-{json.dumps(resume_json, indent=2)[:4000]}
-
-## HTML Requirements
-- Single HTML file, self-contained (no external CSS/fonts/images)
-- Black text on white background
-- Standard system fonts only: Arial, Helvetica, Georgia
-- Clean sections: Summary, Experience, Skills, Projects, Education
-- No tables, no columns, no fancy layout — single column only
-- Font size: name 18px bold, section headers 13px bold, body 11px
-- All dates right-aligned on the same line as title/company
-- Max width 800px, centered, padding 40px
-
-Output ONLY the complete HTML document. Nothing else.
-""",
-        expected_output="A complete self-contained HTML document representing the resume.",
-        agent=agent,
-    )

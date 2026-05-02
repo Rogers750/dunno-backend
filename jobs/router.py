@@ -1,6 +1,5 @@
 import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
-from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database.supabase_client import supabase, supabase_admin
@@ -224,72 +223,6 @@ async def get_resume(
     return {"resume_json": row.data[0].get("resume_json") or {}}
 
 
-# ── GET /jobs/:id/resume/pdf — Agent 7 ───────────────────────────────────────
-
-@jobs_router.get("/{match_id}/resume/pdf")
-async def get_resume_pdf(
-    match_id: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-):
-    """
-    Render the tailored resume to PDF (Agent 7).
-    If pdf_path already exists, serve from Supabase Storage directly.
-    Otherwise render via pyppeteer, upload, then serve.
-    """
-    user = _get_user(credentials)
-
-    row = (
-        supabase_admin.table("user_matched_jobs")
-        .select("id, job_id, resume_json, pdf_path")
-        .eq("id", match_id)
-        .eq("user_id", user.id)
-        .execute()
-    )
-    if not row.data:
-        raise HTTPException(status_code=404, detail="Match not found")
-
-    match = row.data[0]
-    resume_json = match.get("resume_json")
-    if not resume_json:
-        raise HTTPException(status_code=400, detail="No resume JSON found. Generate portfolio first.")
-
-    # Serve cached PDF if already rendered
-    if match.get("pdf_path"):
-        from jobs.storage import download_resume_pdf
-        try:
-            pdf_bytes = download_resume_pdf(match["pdf_path"])
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": "attachment; filename=resume.pdf"},
-            )
-        except Exception:
-            pass  # fall through to re-render
-
-    # Agent 7 — render HTML → PDF
-    from crewai import Crew, Process
-    from jobs.agents import build_pdf_renderer
-    from jobs.tasks import build_pdf_render_task
-    from jobs.storage import render_resume_pdf_sync, upload_resume_pdf
-
-    agent = build_pdf_renderer(
-        __import__("jobs.crew", fromlist=["deepseek_llm"]).deepseek_llm
-    )
-    task = build_pdf_render_task(agent, resume_json)
-    crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
-    result = crew.kickoff()
-    html = result.raw if hasattr(result, "raw") else str(result)
-
-    pdf_bytes = render_resume_pdf_sync(html)
-    pdf_path = upload_resume_pdf(user_id=user.id, job_id=match["job_id"], pdf_bytes=pdf_bytes)
-
-    supabase_admin.table("user_matched_jobs").update({"pdf_path": pdf_path}).eq("id", match_id).execute()
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=resume.pdf"},
-    )
 
 
 # ── GET /jobs/:id/cover ───────────────────────────────────────────────────────
