@@ -46,7 +46,7 @@ All job IDs: <uuid1>, <uuid2>, ...
     )
 
 
-def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict) -> Task:
+def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None) -> Task:
     has_salary = bool(job.get("salary_range"))
     has_ctc = bool(ctc.get("current_base_in_lakhs") and ctc.get("expected_base_in_lakhs"))
     compensation_note = (
@@ -57,6 +57,16 @@ def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict) -> T
         if has_salary and has_ctc
         else "No salary data available for one or both parties. Omit compensation from score_breakdown entirely."
     )
+
+    prefs = preferences or {}
+    pref_lines = []
+    if prefs.get("preferred_locations"):
+        pref_lines.append(f"Preferred locations: {', '.join(prefs['preferred_locations'])}")
+    if prefs.get("company_types"):
+        pref_lines.append(f"Preferred company types: {', '.join(prefs['company_types'])} — weight company_type dimension at 25% of final score")
+    if prefs.get("min_experience") is not None or prefs.get("max_experience") is not None:
+        pref_lines.append(f"Experience range: {prefs.get('min_experience', 0)}–{prefs.get('max_experience', '∞')} years")
+    preferences_note = "\n".join(pref_lines) if pref_lines else "No specific preferences set."
 
     return Task(
         description=f"""
@@ -73,6 +83,9 @@ Description: {(job.get('description') or '')[:2000]}
 
 ## Compensation
 {compensation_note}
+
+## Candidate Preferences (factor these into scoring weights)
+{preferences_note}
 
 ## Scoring Instructions
 Score each dimension 0–10 (float, one decimal):

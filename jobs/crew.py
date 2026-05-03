@@ -79,7 +79,7 @@ def _fail_run(run_id: str, error: str) -> None:
 # ── Context loaders ───────────────────────────────────────────────────────────
 
 def _load_user_context(user_id: str) -> Optional[dict]:
-    profile = supabase_admin.table("profiles").select("id, username, email, ctc").eq("id", user_id).execute()
+    profile = supabase_admin.table("profiles").select("id, username, email, ctc, job_preferences").eq("id", user_id).execute()
     portfolio = supabase_admin.table("portfolios").select("generated_content, target_roles").eq("user_id", user_id).eq("published", True).execute()
 
     if not profile.data or not portfolio.data:
@@ -98,6 +98,7 @@ def _load_user_context(user_id: str) -> Optional[dict]:
         "gen_content": gen_content,
         "target_roles": target_roles,
         "ctc": profile.data[0].get("ctc") or {},
+        "preferences": profile.data[0].get("job_preferences") or {},
     }
 
 
@@ -109,46 +110,50 @@ def _fetch_job(job_id: str) -> Optional[dict]:
 def _get_relevant_unmatched_from_db(
     target_roles: list[str],
     matched_ids: set,
+    preferences: dict,
     min_count: int = 15,
     days: int = 7,
 ) -> list[str]:
     """
     Check job_listings for recent, role-relevant, unmatched jobs.
+    Applies user preferences (location, company_type) as filters.
     Returns IDs if >= min_count found, else empty list (triggers fresh scrape).
-    Filters:
-      - created within `days` days
-      - is_live = True
-      - title contains at least one target role keyword
-      - not already in user_matched_jobs
     """
     from datetime import datetime, timezone, timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     recent = (
         supabase_admin.table("job_listings")
-        .select("id, title")
+        .select("id, title, location")
         .eq("is_live", True)
         .gte("created_at", cutoff)
         .execute()
     )
 
     role_keywords = [r.lower().strip() for r in target_roles if r]
-    # also split multi-word roles into individual keywords for broader matching
-    # e.g. "Senior Data Engineer" → ["senior data engineer", "data engineer", "senior"]
     expanded = set()
     for role in role_keywords:
         expanded.add(role)
         parts = role.split()
         if len(parts) > 1:
-            expanded.add(" ".join(parts[1:]))  # drop seniority prefix
+            expanded.add(" ".join(parts[1:]))
+
+    preferred_locations = [l.lower() for l in (preferences.get("preferred_locations") or [])]
 
     candidates = []
     for row in (recent.data or []):
         if row["id"] in matched_ids:
             continue
         title_lower = (row.get("title") or "").lower()
-        if any(kw in title_lower for kw in expanded):
-            candidates.append(row["id"])
+        if not any(kw in title_lower for kw in expanded):
+            continue
+        # Location filter — only apply if user set preferences
+        if preferred_locations:
+            loc = (row.get("location") or "").lower()
+            remote_ok = "remote" in preferred_locations
+            if not any(pl in loc for pl in preferred_locations) and not (remote_ok and "remote" in loc):
+                continue
+        candidates.append(row["id"])
 
     logger.info(
         f"[crew] DB pool check: {len(candidates)} relevant unmatched jobs "
@@ -193,12 +198,12 @@ def _run_job_search(target_roles: list, gen_content: dict) -> list[str]:
     return list(dict.fromkeys(uuids))
 
 
-def _run_matcher(gen_content: dict, ctc: dict, job: dict) -> MatchResult:
+def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None) -> MatchResult:
     from jobs.agents import build_profile_matcher
     from jobs.tasks import build_match_task
 
     agent = build_profile_matcher(deepseek_llm)
-    task = build_match_task(agent, gen_content, ctc, job)
+    task = build_match_task(agent, gen_content, ctc, job, preferences)
     crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
     result = crew.kickoff()
 
@@ -292,7 +297,8 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         matched_ids = {r["job_id"] for r in (existing.data or [])}
 
         # Try DB first — skip Apify if enough relevant recent jobs already exist
-        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids)
+        preferences = ctx["preferences"]
+        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences)
         if db_ids:
             new_ids = db_ids
             logger.info(f"[jobs_crew] skipping Apify — using {len(new_ids)} jobs from DB")
@@ -328,14 +334,42 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
             if not job:
                 continue
             try:
-                match_result = _run_matcher(gen_content, ctc, job)
+                match_result = _run_matcher(gen_content, ctc, job, preferences)
                 scored.append((job_id, job, match_result))
                 logger.info(f"[jobs_crew] scored job={job_id} '{job['title']}' score={match_result.match_score:.1f}")
             except Exception as e:
                 logger.error(f"[jobs_crew] matcher failed job={job_id}: {e}", exc_info=True)
 
-        # Sort descending by match_score, take top `limit`
-        scored.sort(key=lambda x: x[2].match_score, reverse=True)
+        # Apply preference-based filtering before ranking
+        preferred_locations = [l.lower() for l in (preferences.get("preferred_locations") or [])]
+        preferred_types = [t.lower() for t in (preferences.get("company_types") or [])]
+        min_exp = preferences.get("min_experience")
+        max_exp = preferences.get("max_experience")
+
+        def _preference_score(job_id: str, job: dict, match: MatchResult) -> float:
+            score = match.match_score
+            breakdown = match.score_breakdown
+
+            # Location — if preferences set, soft-penalise mismatches (-1.5)
+            if preferred_locations:
+                loc = (job.get("location") or "").lower()
+                remote_ok = "remote" in preferred_locations
+                location_match = any(pl in loc for pl in preferred_locations) or (remote_ok and "remote" in loc)
+                if not location_match:
+                    score -= 1.5
+
+            # Company type — if preferences set, boost weight of company_type dimension
+            if preferred_types and breakdown.company_type is not None:
+                score = score * 0.85 + breakdown.company_type * 0.15
+
+            # Experience range — penalise if experience score is very low and range is set
+            if (min_exp is not None or max_exp is not None) and breakdown.experience is not None:
+                if breakdown.experience < 4.0:
+                    score -= 0.5
+
+            return score
+
+        scored.sort(key=lambda x: _preference_score(x[0], x[1], x[2]), reverse=True)
         top_jobs = scored[:limit]
 
         progress["completed_agents"].append("Agent 2 — Profile Matcher")

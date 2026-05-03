@@ -9,6 +9,15 @@ class CTCUpdate(BaseModel):
     expected_base_in_lakhs: float = Field(gt=0)
 
 
+# ── Job Preferences ───────────────────────────────────────────────────────────
+
+class JobPreferencesUpdate(BaseModel):
+    preferred_locations: Optional[List[str]] = None   # ["Bangalore", "Remote", "Mumbai"]
+    company_types: Optional[List[str]] = None          # ["startup", "mnc", "product", "service"]
+    min_experience: Optional[float] = None             # years
+    max_experience: Optional[float] = None             # years
+
+
 # ── Agent output models (enforced via output_pydantic) ────────────────────────
 
 class ScoreBreakdown(BaseModel):

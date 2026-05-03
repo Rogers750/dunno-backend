@@ -3,7 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database.supabase_client import supabase, supabase_admin
-from jobs.schemas import CTCUpdate
+from jobs.schemas import CTCUpdate, JobPreferencesUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -374,3 +374,45 @@ async def update_ctc(
         f"current={payload.current_base_in_lakhs} expected={payload.expected_base_in_lakhs}"
     )
     return result.data[0]
+
+
+# ── PATCH /profile/preferences ────────────────────────────────────────────────
+
+@profile_router.patch("/preferences")
+async def update_preferences(
+    payload: JobPreferencesUpdate,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Save job search preferences: locations, company types, experience range."""
+    user = _get_user(credentials)
+
+    # Fetch existing preferences and merge — only overwrite fields that are sent
+    existing = supabase_admin.table("profiles").select("job_preferences").eq("id", user.id).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    current = existing.data[0].get("job_preferences") or {}
+    if payload.preferred_locations is not None:
+        current["preferred_locations"] = payload.preferred_locations
+    if payload.company_types is not None:
+        current["company_types"] = payload.company_types
+    if payload.min_experience is not None:
+        current["min_experience"] = payload.min_experience
+    if payload.max_experience is not None:
+        current["max_experience"] = payload.max_experience
+
+    result = supabase_admin.table("profiles").update({"job_preferences": current}).eq("id", user.id).execute()
+    logger.info(f"[profile/preferences] user={user.id} prefs={current}")
+    return result.data[0]
+
+
+# ── GET /profile/preferences ──────────────────────────────────────────────────
+
+@profile_router.get("/preferences")
+async def get_preferences(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current job search preferences."""
+    user = _get_user(credentials)
+    result = supabase_admin.table("profiles").select("job_preferences").eq("id", user.id).execute()
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return result.data[0].get("job_preferences") or {}
