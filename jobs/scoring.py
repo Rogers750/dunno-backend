@@ -95,8 +95,6 @@ def calc_experience_score(candidate_years: float, min_req: float, max_req: float
     return 1.5                  # 5+ years short — significant mismatch
 
 
-# ── Skills score ──────────────────────────────────────────────────────────────
-
 # ── JD keyword extraction for resume tailoring ────────────────────────────────
 
 # Multi-word tech phrases to extract before single-word parsing
@@ -197,38 +195,3 @@ def extract_jd_must_have_keywords(description: str, candidate_skills: set[str]) 
     return result[:40]  # cap at 40 to keep prompt size sane
 
 
-def calc_skills_score(gen_content: dict, job_description: str) -> float | None:
-    """
-    Measures what % of the candidate's skills appear in the job description.
-    Falls back to None if candidate has no skills listed.
-    """
-    skills_data = gen_content.get("skills", {})
-    if isinstance(skills_data, list):
-        # flat list format
-        all_skills = set()
-        for group in skills_data:
-            for item in (group.get("items") or []):
-                all_skills.add(item.lower().strip())
-    elif isinstance(skills_data, dict):
-        all_skills = set()
-        for category in ["languages", "frameworks", "tools", "concepts"]:
-            for skill in skills_data.get(category, []):
-                all_skills.add(skill.lower().strip())
-    else:
-        return None
-
-    if not all_skills:
-        return None
-
-    jd_lower = (job_description or "").lower()
-    matched = sum(1 for skill in all_skills if skill in jd_lower)
-    match_rate = matched / len(all_skills)
-
-    logger.info(f"[scoring] skills matched={matched}/{len(all_skills)} rate={match_rate:.2f}")
-
-    if match_rate >= 0.5:  return 9.5
-    if match_rate >= 0.35: return 8.0
-    if match_rate >= 0.2:  return 6.5
-    if match_rate >= 0.1:  return 5.0
-    if match_rate >= 0.05: return 3.5
-    return 2.0

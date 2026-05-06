@@ -47,10 +47,7 @@ All job IDs: <uuid1>, <uuid2>, ...
 
 
 def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None) -> Task:
-    from jobs.scoring import (
-        extract_candidate_years, extract_required_years,
-        calc_experience_score, calc_skills_score,
-    )
+    from jobs.scoring import extract_candidate_years, extract_required_years, calc_experience_score
 
     description = job.get("description") or ""
 
@@ -58,20 +55,14 @@ def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, pref
     candidate_years = extract_candidate_years(gen_content)
     min_req, max_req = extract_required_years(description)
     experience_score = calc_experience_score(candidate_years, min_req, max_req)
-    skills_score = calc_skills_score(gen_content, description)
 
-    # Build anchor block for the prompt
+    # Build anchor block — only experience is deterministic; skills scored by LLM
     anchor_lines = []
     if experience_score is not None:
         req_str = f"{min_req}–{max_req}yr required" if max_req else f"{min_req}+yr required"
         anchor_lines.append(
             f"- experience: {experience_score} "
             f"(candidate has {candidate_years}yr, {req_str}) — USE THIS EXACT VALUE"
-        )
-    if skills_score is not None:
-        anchor_lines.append(
-            f"- skills: {skills_score} "
-            f"(calculated from skill overlap with JD) — USE THIS EXACT VALUE"
         )
     anchors_block = (
         "## Pre-calculated scores — copy these exact values into score_breakdown, do NOT change them\n"
@@ -80,12 +71,10 @@ def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, pref
         else ""
     )
 
-    # Remaining dimensions DeepSeek must score itself
-    llm_dimensions = ["role", "education", "company_type"]
+    # Dimensions DeepSeek must score itself
+    llm_dimensions = ["role", "skills", "education", "company_type"]
     if experience_score is None:
         llm_dimensions.insert(1, "experience")
-    if skills_score is None:
-        llm_dimensions.insert(1, "skills")
 
     # ── Compensation ──────────────────────────────────────────────────────────
     has_salary = bool(job.get("salary_range"))
@@ -108,18 +97,31 @@ def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, pref
         pref_lines.append(f"Preferred company types: {', '.join(prefs['company_types'])} — weight company_type at 25% of final score")
     preferences_note = "\n".join(pref_lines) if pref_lines else "No specific preferences set."
 
+    # Send skills + experience in full, truncate the rest
+    skills_json = json.dumps(gen_content.get("skills", {}), indent=2)
+    experience_json = json.dumps(gen_content.get("experience", []), indent=2)
+    personal_json = json.dumps(gen_content.get("personal", {}), indent=2)
+    education_json = json.dumps(gen_content.get("education", []), indent=2)
+
     return Task(
         description=f"""
 Score how well this job matches the candidate's profile.
 
-## Candidate Portfolio
-{json.dumps(gen_content, indent=2)[:3000]}
+## Candidate Skills (complete — use this for skills scoring)
+{skills_json}
+
+## Candidate Experience
+{experience_json[:2000]}
+
+## Candidate Personal & Education
+{personal_json}
+{education_json}
 
 ## Job Details
 Title: {job.get('title')}
 Company: {job.get('company')}
 Platform: {job.get('platform')}
-Description: {description[:2000]}
+Description: {description[:2500]}
 
 ## Compensation
 {compensation_note}
@@ -132,12 +134,14 @@ Description: {description[:2000]}
 ## Your job — score ONLY these dimensions (0–10, one decimal):
 {chr(10).join(f"- {d}" for d in llm_dimensions)}
 
-role: how well the job title/responsibilities match the candidate's target roles
-education: degree/field alignment
-company_type: startup/enterprise/product/service fit based on candidate's background
+Scoring guidance:
+- role: how well the job title and responsibilities match the candidate's target roles and past job titles
+- skills: look at the candidate's full skills list above vs the technologies/tools explicitly required in the JD. Score high (8-10) if the candidate has the core required stack, medium (5-7) if partial overlap, low (1-4) if major required skills are missing
+- education: degree level and field alignment with job requirements
+- company_type: does the candidate's background (startup/product/enterprise/service) match this company's type
 
 ## Final match_score
-Weighted average of ALL dimensions (including the pre-calculated ones).
+Weighted average of ALL dimensions (including pre-calculated ones).
 Weights: role=30%, skills=25%, experience=25%, education=10%, company_type=10%.
 If compensation is present, add it with 10% weight and reduce others proportionally.
 
