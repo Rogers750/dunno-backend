@@ -143,10 +143,10 @@ async def list_applied_jobs(credentials: HTTPAuthorizationCredentials = Depends(
 
     matches = (
         supabase_admin.table("user_matched_jobs")
-        .select("id, job_id, match_score, score_breakdown, company_info, status, updated_at")
+        .select("id, job_id, match_score, score_breakdown, company_info, status")
         .eq("user_id", user.id)
         .eq("status", "applied")
-        .order("updated_at", desc=True)
+        .order("created_at", desc=True)
         .execute()
     )
 
