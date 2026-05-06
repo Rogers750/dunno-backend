@@ -422,6 +422,51 @@ def _enforce_source_role_titles(resume_json: dict, gen_content: dict) -> dict:
     return resume_json
 
 
+def _enforce_resume_schema(resume_json: dict, gen_content: dict) -> dict:
+    """Guarantee top-level keys that LLMs occasionally drop, filling from source or empty defaults."""
+    for key, default in [("certifications", []), ("publications", []), ("achievements", [])]:
+        if key not in resume_json or resume_json[key] is None:
+            resume_json[key] = gen_content.get(key) or default
+    if "basics" not in resume_json:
+        resume_json["basics"] = {}
+    for key in ("experience", "education", "projects"):
+        if key not in resume_json or not isinstance(resume_json[key], list):
+            resume_json[key] = gen_content.get(key) or []
+    if "skills" not in resume_json or not isinstance(resume_json["skills"], dict):
+        resume_json["skills"] = gen_content.get("skills") or {}
+
+    # Warn if any experience entry has fewer than 4 bullets (can't auto-fix content)
+    for exp in resume_json.get("experience", []):
+        bullets = exp.get("bullets", [])
+        if len(bullets) < 4:
+            logger.warning(
+                "[enforce_schema] experience at %s has only %d bullet(s) — validator should have fixed this",
+                exp.get("company", "?"), len(bullets),
+            )
+
+    # Ensure every source project appears in the resume projects list
+    resume_project_names = {p.get("name", "").lower() for p in resume_json.get("projects", [])}
+    for src_project in gen_content.get("projects", []):
+        if src_project.get("name", "").lower() not in resume_project_names:
+            logger.warning(
+                "[enforce_schema] project '%s' missing from resume — appending from source",
+                src_project.get("name"),
+            )
+            resume_json["projects"].append({
+                "name": src_project.get("name", ""),
+                "description": src_project.get("description", ""),
+                "techStack": src_project.get("techStack") or src_project.get("tech_stack") or [],
+                "link": src_project.get("link") or src_project.get("url", ""),
+                "startDate": src_project.get("startDate", ""),
+                "endDate": src_project.get("endDate", ""),
+                "sortDate": src_project.get("sortDate", ""),
+                "endSortDate": src_project.get("endSortDate", ""),
+                "highlights": src_project.get("highlights", []),
+            })
+
+    return resume_json
+
+
 # ── Main orchestration ────────────────────────────────────────────────────────
 
 def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None:
@@ -604,6 +649,7 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
         validated_json = resume_json
 
     validated_json = _enforce_source_role_titles(validated_json, gen_content)
+    validated_json = _enforce_resume_schema(validated_json, gen_content)
 
     supabase_admin.table("user_matched_jobs").update({"resume_json": validated_json}).eq("id", match_id).execute()
     logger.info(f"[build_resume] saved resume match_id={match_id}")
@@ -755,6 +801,7 @@ def build_general_resume_and_cover(user_id: str) -> dict:
         validated_json = resume_json
 
     validated_json = _enforce_source_role_titles(validated_json, gen_content)
+    validated_json = _enforce_resume_schema(validated_json, gen_content)
 
     cover_agent = build_cover_letter_writer(deepseek_llm)
     cover_task = build_general_cover_letter_task(cover_agent, gen_content, target_roles)
