@@ -603,8 +603,16 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
     Called on demand when user clicks 'Build my resume'.
     Returns the resume JSON and persists it to user_matched_jobs.
     """
-    from jobs.agents import build_resume_builder, build_resume_validator
-    from jobs.tasks import build_resume_task, build_resume_validation_task
+    from jobs.agents import (
+        build_resume_builder,
+        build_resume_refiner,
+        build_resume_validator,
+    )
+    from jobs.tasks import (
+        build_resume_refinement_task,
+        build_resume_task,
+        build_resume_validation_task,
+    )
 
     ctx = _load_user_context(user_id)
     if not ctx:
@@ -634,9 +642,23 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
         logger.error("[build_resume] builder returned non-JSON, raw=%s", raw[:300])
         raise ValueError("Resume builder returned invalid JSON")
 
+    # Agent: Refiner — improves effort visibility and project/experience alignment
+    refiner = build_resume_refiner(deepseek_reasoner_llm)
+    refine_task = build_resume_refinement_task(refiner, gen_content, job, resume_json)
+    refine_result = Crew(agents=[refiner], tasks=[refine_task], process=Process.sequential, verbose=False).kickoff()
+
+    refine_raw = refine_result.raw if hasattr(refine_result, "raw") else str(refine_result)
+    refine_raw = re.sub(r"^```(?:json)?\n?", "", refine_raw.strip())
+    refine_raw = re.sub(r"\n?```$", "", refine_raw.strip())
+    try:
+        refined_json = json.loads(refine_raw)
+    except Exception:
+        logger.warning("[build_resume] refiner returned non-JSON, using builder output")
+        refined_json = resume_json
+
     # Agent: Validator — cross-checks against gen_content, fixes issues
     validator = build_resume_validator(deepseek_reasoner_llm)
-    validate_task = build_resume_validation_task(validator, gen_content, job, resume_json)
+    validate_task = build_resume_validation_task(validator, gen_content, job, refined_json)
     validate_result = Crew(agents=[validator], tasks=[validate_task], process=Process.sequential, verbose=False).kickoff()
 
     val_raw = validate_result.raw if hasattr(validate_result, "raw") else str(validate_result)
@@ -645,8 +667,8 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
     try:
         validated_json = json.loads(val_raw)
     except Exception:
-        logger.warning("[build_resume] validator returned non-JSON, using builder output")
-        validated_json = resume_json
+        logger.warning("[build_resume] validator returned non-JSON, using refined output")
+        validated_json = refined_json
 
     validated_json = _enforce_source_role_titles(validated_json, gen_content)
     validated_json = _enforce_resume_schema(validated_json, gen_content)
@@ -737,9 +759,15 @@ def build_general_resume_and_cover(user_id: str) -> dict:
     published portfolio. Unlike the matched-job flow, this is not tied to a
     specific company or job description and returns the result directly.
     """
-    from jobs.agents import build_resume_builder, build_resume_validator, build_cover_letter_writer
+    from jobs.agents import (
+        build_cover_letter_writer,
+        build_resume_builder,
+        build_resume_refiner,
+        build_resume_validator,
+    )
     from jobs.tasks import (
         build_general_resume_task,
+        build_general_resume_refinement_task,
         build_general_resume_validation_task,
         build_general_cover_letter_task,
     )
@@ -780,9 +808,29 @@ def build_general_resume_and_cover(user_id: str) -> dict:
         logger.error("[build_general_resume_and_cover] builder returned non-JSON, raw=%s", raw[:300])
         raise ValueError("Resume builder returned invalid JSON")
 
+    refiner = build_resume_refiner(deepseek_reasoner_llm)
+    refine_task = build_general_resume_refinement_task(
+        refiner, gen_content, target_roles, resume_json
+    )
+    refine_result = Crew(
+        agents=[refiner],
+        tasks=[refine_task],
+        process=Process.sequential,
+        verbose=False,
+    ).kickoff()
+
+    refine_raw = refine_result.raw if hasattr(refine_result, "raw") else str(refine_result)
+    refine_raw = re.sub(r"^```(?:json)?\n?", "", refine_raw.strip())
+    refine_raw = re.sub(r"\n?```$", "", refine_raw.strip())
+    try:
+        refined_json = json.loads(refine_raw)
+    except Exception:
+        logger.warning("[build_general_resume_and_cover] refiner returned non-JSON, using builder output")
+        refined_json = resume_json
+
     validator = build_resume_validator(deepseek_reasoner_llm)
     validate_task = build_general_resume_validation_task(
-        validator, gen_content, target_roles, resume_json
+        validator, gen_content, target_roles, refined_json
     )
     validate_result = Crew(
         agents=[validator],
@@ -797,8 +845,8 @@ def build_general_resume_and_cover(user_id: str) -> dict:
     try:
         validated_json = json.loads(val_raw)
     except Exception:
-        logger.warning("[build_general_resume_and_cover] validator returned non-JSON, using builder output")
-        validated_json = resume_json
+        logger.warning("[build_general_resume_and_cover] validator returned non-JSON, using refined output")
+        validated_json = refined_json
 
     validated_json = _enforce_source_role_titles(validated_json, gen_content)
     validated_json = _enforce_resume_schema(validated_json, gen_content)

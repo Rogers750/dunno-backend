@@ -255,12 +255,14 @@ Description: {description[:3000]}
 3. Read the job description carefully. Identify the 10-15 most important technical keywords and tools the JD requires. Every keyword from the candidate's existing skills that appears in the JD MUST appear naturally at least once in the resume (summary or bullets).
 4. Rewrite basics.summary (3 sentences max, tight, MUST fit in 3-4 lines when rendered): sentence 1 — who the candidate is + years of experience + core domain; sentence 2 — the 2-3 most relevant technical strengths for THIS role using exact JD terminology; sentence 3 — one concrete impact statement (scale, business outcome, or metric). Keep each sentence short. Do NOT write a fourth sentence.
 5. Rewrite experience bullets with FULL technical depth — do NOT summarise or cut content. Each role must have 4-6 bullets. Each bullet must: start with a strong action verb, name the exact technology/tool used, describe the architectural decision or technical approach, and end with a measurable outcome (scale, latency, throughput, cost, or business impact). Never write vague bullets like "worked on pipelines" or "improved performance" — always say HOW and HOW MUCH. Surface the hardest technical problems solved in each role.
-6. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
-7. Projects: use ONLY the pre-selected projects above. For each: write a description of exactly 1-2 sentences that are dense and specific — cover what the project does, the tech used (mirroring JD keywords where possible), and the scale or outcome. No vague phrases like "built a system" or "worked on". Leave highlights as an empty array [].
-8. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
-9. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
-10. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
-11. Preserve the candidate's original experience role titles from the source portfolio. Do NOT rename titles into cleaner, broader, or more marketable variants.
+6. Make the candidate's actual effort visible, but keep it controlled: mention ownership, implementation work, debugging, integrations, optimization, production hardening, stakeholder coordination, or rollout effort when grounded in the source. Add a bit more depth than the raw source if needed, but do not over-write or become wordy.
+7. If a selected project came from professional work or overlaps with a real experience entry, make sure the relevant system components, technologies, and effort also appear in that experience's bullets. Do NOT force personal or standalone projects into company experience when the source does not support that link.
+8. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
+9. Projects: use ONLY the pre-selected projects above. For each: write a description of exactly 1-2 sentences that are dense and specific — cover what the project does, the tech used (mirroring JD keywords where possible), and the scale or outcome. No vague phrases like "built a system" or "worked on". Leave highlights as an empty array [].
+10. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
+11. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
+12. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
+13. Preserve the candidate's original experience role titles from the source portfolio. Do NOT rename titles into cleaner, broader, or more marketable variants.
 
 ## Hard rules — never break these
 - NEVER add a technology, tool, or framework the candidate hasn't used.
@@ -301,6 +303,45 @@ Return ONLY the resume JSON. No markdown, no explanation. Schema:
 }}
 """,
         expected_output="A complete, valid JSON resume object tailored to the specified job.",
+        agent=agent,
+    )
+
+
+def build_resume_refinement_task(agent: Agent, gen_content: dict, job: dict, resume_json: dict) -> Task:
+    source_projects = gen_content.get("projects", [])
+    source_experience = gen_content.get("experience", [])
+
+    return Task(
+        description=f"""
+Refine this generated resume JSON before final validation.
+Your goal is to improve project-to-experience alignment and make real effort
+more visible, while staying fully faithful to the source.
+
+## Original Portfolio (source of truth)
+Experience:
+{json.dumps(source_experience, indent=2)[:3500]}
+
+Projects:
+{json.dumps(source_projects, indent=2)[:2500]}
+
+## Target Job
+Title: {job.get('title')}
+Company: {job.get('company')}
+Description: {(job.get('description') or '')[:2000]}
+
+## Generated Resume to Refine
+{json.dumps(resume_json, indent=2)[:5000]}
+
+## What you MUST improve
+1. EXPERIENCE-PROJECT ALIGNMENT — when a project reflects work that came from a real role, ensure the related experience bullets also mention the relevant component, system area, integration, or technical effort. Keep the mapping factual.
+2. NO FALSE MAPPING — if a project is clearly personal, academic, freelance, or otherwise separate from a company role, keep it in projects only. Do not inject it into experience.
+3. EFFORT VISIBILITY — slightly deepen bullets so the candidate's actual implementation effort is clearer: architecture choices, migrations, debugging, performance tuning, productionization, ownership, coordination, deployment, observability, or scale handling. Keep the depth moderate, not verbose.
+4. EXPERIENCE QUALITY — every role should read like real engineering work with concrete technologies, action, and outcomes. Remove shallow wording and replace it with clearer specifics grounded in the source.
+5. PROJECT DESCRIPTIONS — keep project descriptions concise but substantive. Make sure they explain what was built, what stack was used, and why it mattered.
+6. FACTUALITY — do not add new companies, titles, metrics, or tools not supported by the source portfolio.
+7. OUTPUT — return the full corrected resume JSON only. No markdown and no explanation.
+""",
+        expected_output="A refined resume JSON with stronger experience-project alignment and clearer effort visibility.",
         agent=agent,
     )
 
@@ -418,14 +459,17 @@ Company: {job.get('company')}
 ## What to check and fix
 1. COMPLETENESS — every experience from the source must appear. If any role is missing, add it back from the original portfolio.
 2. EXPERIENCE DEPTH — every experience entry MUST have at least 4 bullets. If any role has fewer than 4, expand them: add the missing technical depth, architectural decisions, tools used, and measurable outcomes. Never leave a role with 1-2 thin bullets.
-3. NO INVENTED TECH — check every skill, tool, and technology in the resume against the known skills list. Remove any that don't appear in the source.
-4. NO EMPTY ARRAYS — experience bullets, skills lists must not be empty. Populate from source if needed.
-5. PROJECTS PRESENT — every project from the source list must appear in the resume. If any project is missing, add it back with a 1-2 sentence description and its tech stack.
-6. SOCIAL LINKS — all links (linkedin, github, twitter, medium, portfolio, website) from the original personal section must be in basics.
-7. SUMMARY — must be specific to the target job, not generic. If it's generic, rewrite it.
-8. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
-9. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered by JD relevance.
-10. ROLE TITLE CONSISTENCY — keep each experience role title aligned with the original source portfolio naming. Do not embellish or normalize titles unless the source itself differs.
+3. PROJECT-TO-EXPERIENCE COVERAGE — if project work clearly came from a real role in the source portfolio, make sure the related technologies, components, and effort are visible in that role's bullets too. Do not leave meaningful implementation details stranded only in the projects section.
+4. NO FALSE PROJECT MAPPING — do not force personal or standalone projects into company experience if the source does not support that link.
+5. NO INVENTED TECH — check every skill, tool, and technology in the resume against the known skills list. Remove any that don't appear in the source.
+6. NO EMPTY ARRAYS — experience bullets, skills lists must not be empty. Populate from source if needed.
+7. PROJECTS PRESENT — every project from the source list must appear in the resume. If any project is missing, add it back with a 1-2 sentence description and its tech stack.
+8. SOCIAL LINKS — all links (linkedin, github, twitter, medium, portfolio, website) from the original personal section must be in basics.
+9. SUMMARY — must be specific to the target job, not generic. If it's generic, rewrite it.
+10. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
+11. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered by JD relevance.
+12. ROLE TITLE CONSISTENCY — keep each experience role title aligned with the original source portfolio naming. Do not embellish or normalize titles unless the source itself differs.
+13. EFFORT VISIBILITY — where the source indicates meaningful engineering effort, make sure bullets show a bit more of the real implementation work and ownership. Keep it crisp, not bloated.
 
 Fix every issue you find. Return ONLY the corrected resume JSON. No explanation, no markdown.
 """,
@@ -460,11 +504,13 @@ for these target roles: {roles_str}
 2. Include ALL social links (linkedin, github, twitter, medium, website, etc.) from personal/social.
 3. Rewrite basics.summary as a strong all-purpose summary for the target roles above. 3 sentences max, MUST fit in 3-4 lines when rendered. Keep each sentence short. It must be role-specific, keyword-rich, and reusable across many applications without naming any company. Do NOT write a fourth sentence.
 4. Rewrite experience bullets to emphasise broad strengths: ownership, scale, systems design, execution, impact, and technologies repeatedly used in the source.
-5. Reorder skills categories so the most marketable and role-relevant categories appear first. Include ALL skills from source.
-6. Pick the 2-3 strongest projects for the target roles. Rewrite highlights to show relevance across those roles.
-7. Keep the tone aligned with the candidate's actual seniority and most likely target roles.
-8. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
-9. Preserve the candidate's original experience role titles from the source portfolio. Do NOT rename titles into more generic or more polished variants.
+5. Make the candidate's effort more visible with a small increase in depth: show implementation work, architectural choices, integrations, debugging, optimization, and rollout or production support where grounded in the source. Keep it concise.
+6. If a project overlaps with professional work, make sure the supporting experience bullets also reflect the relevant components, systems, and effort. Do NOT force standalone personal projects into company experience.
+7. Reorder skills categories so the most marketable and role-relevant categories appear first. Include ALL skills from source.
+8. Pick the 2-3 strongest projects for the target roles. Rewrite highlights to show relevance across those roles.
+9. Keep the tone aligned with the candidate's actual seniority and most likely target roles.
+10. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
+11. Preserve the candidate's original experience role titles from the source portfolio. Do NOT rename titles into more generic or more polished variants.
 
 ## Hard rules — never break these
 - NEVER add a technology, tool, or framework the candidate hasn't used.
@@ -510,6 +556,46 @@ Return ONLY the resume JSON. No markdown, no explanation. Schema:
     )
 
 
+def build_general_resume_refinement_task(
+    agent: Agent,
+    gen_content: dict,
+    target_roles: list[str],
+    resume_json: dict,
+) -> Task:
+    roles_str = ", ".join(target_roles) if target_roles else "software engineer"
+
+    return Task(
+        description=f"""
+Refine this all-purpose resume JSON before final validation.
+Your goal is to make real effort and project-to-experience alignment clearer
+without changing the facts.
+
+## Original Portfolio (source of truth)
+Experience:
+{json.dumps(gen_content.get('experience', []), indent=2)[:3500]}
+
+Projects:
+{json.dumps(gen_content.get('projects', []), indent=2)[:2500]}
+
+## Target Roles
+{roles_str}
+
+## Generated Resume to Refine
+{json.dumps(resume_json, indent=2)[:5000]}
+
+## What you MUST improve
+1. Bring visible technical depth into the experience bullets: implementation details, architecture, integrations, performance work, debugging, production hardening, and ownership where supported by the source.
+2. When a project reflects work that came from a real role, make sure the related experience bullets also carry those relevant components and efforts.
+3. Keep standalone personal or academic projects separate from company experience unless the source clearly ties them together.
+4. Make project descriptions concise but more concrete so the candidate's effort and outcome are obvious.
+5. Do not invent new companies, tools, metrics, titles, or achievements.
+6. Return ONLY the full corrected resume JSON. No markdown, no explanation.
+""",
+        expected_output="A refined all-purpose resume JSON with clearer effort visibility and stronger alignment.",
+        agent=agent,
+    )
+
+
 def build_general_resume_validation_task(
     agent: Agent,
     gen_content: dict,
@@ -542,14 +628,17 @@ Social/personal: {json.dumps(gen_content.get('personal', {}), indent=2)}
 ## What to check and fix
 1. COMPLETENESS — every experience from the source must appear. If any role is missing, add it back from the original portfolio.
 2. EXPERIENCE DEPTH — every experience entry MUST have at least 4 bullets. If any role has fewer than 4, expand them: add the missing technical depth, architectural decisions, tools used, and measurable outcomes. Never leave a role with 1-2 thin bullets.
-3. NO INVENTED TECH — check every skill, tool, and technology in the resume against the known skills list. Remove any that don't appear in the source.
-4. NO EMPTY ARRAYS — experience bullets, skills lists must not be empty. Populate from source if needed.
-5. PROJECTS PRESENT — every project from the source list must appear in the resume. If any project is missing, add it back with a 1-2 sentence description and its tech stack.
-6. SOCIAL LINKS — all links (linkedin, github, twitter, medium, portfolio, website) from the original personal/social sections must be in basics.
-7. SUMMARY — must be specific to the target roles above, not generic fluff and not tied to one company.
-8. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
-9. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered for the target roles.
-10. ROLE TITLE CONSISTENCY — keep each experience role title aligned with the original source portfolio naming. Do not embellish or normalize titles unless the source itself differs.
+3. PROJECT-TO-EXPERIENCE COVERAGE — if a project clearly reflects work done in a real role, make sure the relevant components, technologies, and effort also appear in that role's bullets.
+4. NO FALSE PROJECT MAPPING — do not force personal, academic, or standalone projects into company experience when the source does not support it.
+5. NO INVENTED TECH — check every skill, tool, and technology in the resume against the known skills list. Remove any that don't appear in the source.
+6. NO EMPTY ARRAYS — experience bullets, skills lists must not be empty. Populate from source if needed.
+7. PROJECTS PRESENT — every project from the source list must appear in the resume. If any project is missing, add it back with a 1-2 sentence description and its tech stack.
+8. SOCIAL LINKS — all links (linkedin, github, twitter, medium, portfolio, website) from the original personal/social sections must be in basics.
+9. SUMMARY — must be specific to the target roles above, not generic fluff and not tied to one company.
+10. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
+11. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered for the target roles.
+12. ROLE TITLE CONSISTENCY — keep each experience role title aligned with the original source portfolio naming. Do not embellish or normalize titles unless the source itself differs.
+13. EFFORT VISIBILITY — where the source supports it, make bullets show the real implementation effort a bit more clearly without bloating them.
 
 Fix every issue you find. Return ONLY the corrected resume JSON. No explanation, no markdown.
 """,

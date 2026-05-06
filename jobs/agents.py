@@ -73,13 +73,37 @@ def build_resume_builder(llm: LLM) -> Agent:
         goal=(
             "Produce a perfectly tailored resume JSON for a specific job application. "
             "Reorder and rewrite bullets, skills, and projects to maximise relevance "
-            "for this exact role and company. Output must be valid JSON only."
+            "for this exact role and company. Ensure the work shown in projects is also "
+            "visible in the appropriate experience entries when it came from professional "
+            "work. Output must be valid JSON only."
         ),
         backstory=(
             "You are a professional resume writer who has helped hundreds of engineers "
             "land roles at top tech companies. You know what hiring managers and ATS systems "
             "look for. You tailor every resume to the specific job description without "
-            "inventing experience or fabricating metrics."
+            "inventing experience or fabricating metrics. You know how to make real effort, "
+            "ownership, and implementation depth visible without sounding inflated."
+        ),
+        tools=[],
+        llm=llm,
+        allow_delegation=False,
+        verbose=False,
+    )
+
+
+def build_resume_refiner(llm: LLM) -> Agent:
+    return Agent(
+        role="Resume Experience-Project Alignment Editor",
+        goal=(
+            "Refine a generated resume JSON so that project work, system components, and "
+            "implementation effort are represented clearly in the right experience entries "
+            "without adding anything untrue. Return valid JSON only."
+        ),
+        backstory=(
+            "You are a senior technical editor for engineering resumes. You specialize in "
+            "showing real execution: architecture choices, shipped components, ownership, "
+            "debugging effort, integrations, and measurable outcomes. You never invent new "
+            "work, but you do make understated work visible."
         ),
         tools=[],
         llm=llm,
@@ -94,13 +118,16 @@ def build_resume_validator(llm: LLM) -> Agent:
         goal=(
             "Audit a generated resume JSON against the candidate's original portfolio. "
             "Fix any missing sections, empty fields, invented tech, or poor JD alignment. "
-            "Return a corrected, complete resume JSON."
+            "Make sure project-backed work is visible in the right experience entries and "
+            "return a corrected, complete resume JSON."
         ),
         backstory=(
             "You are a meticulous resume reviewer who ensures every resume is factually "
             "accurate, complete, and maximally tailored to the target job. You never let "
             "a resume go out with missing experience entries, empty bullets, invented tools, "
-            "or a generic summary. You fix issues directly and return the corrected JSON."
+            "or a generic summary. You also catch when important implementation effort is "
+            "buried in projects but missing from the experience section. You fix issues "
+            "directly and return the corrected JSON."
         ),
         tools=[],
         llm=llm,
@@ -149,5 +176,4 @@ def build_project_advisor(llm: LLM) -> Agent:
         allow_delegation=False,
         verbose=False,
     )
-
 
