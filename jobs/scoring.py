@@ -11,11 +11,12 @@ def _parse_date(s: str) -> datetime | None:
     if not s:
         return None
     s = s.strip()
-    for fmt in ("%Y-%m", "%b %Y", "%B %Y", "%Y"):
+    for fmt in ("%Y-%m", "%b %Y", "%B %Y", "%Y", "%m/%Y", "%Y-%m-%d", "%d %b %Y", "%d %B %Y"):
         try:
             return datetime.strptime(s, fmt)
         except ValueError:
             continue
+    logger.warning(f"[scoring] unparseable date: {s!r}")
     return None
 
 
@@ -35,6 +36,7 @@ def extract_candidate_years(gen_content: dict) -> float:
         end_str = role.get("endDate") or role.get("endSortDate") or ""
 
         is_current = end_str in ("Present", "present", "9999-12", "", "Current", "current")
+        logger.debug(f"[scoring] role date strings: start={start_str!r} end={end_str!r} is_current={is_current}")
         start = _parse_date(start_str)
         end = now if is_current else _parse_date(end_str)
 
