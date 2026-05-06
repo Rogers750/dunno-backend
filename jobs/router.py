@@ -134,6 +134,32 @@ async def list_jobs(credentials: HTTPAuthorizationCredentials = Depends(security
     return results
 
 
+# ── GET /jobs/applied ────────────────────────────────────────────────────────
+
+@jobs_router.get("/applied")
+async def list_applied_jobs(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """All jobs the user has marked as applied, sorted by most recently applied."""
+    user = _get_user(credentials)
+
+    matches = (
+        supabase_admin.table("user_matched_jobs")
+        .select("id, job_id, match_score, score_breakdown, company_info, status, updated_at")
+        .eq("user_id", user.id)
+        .eq("status", "applied")
+        .order("updated_at", desc=True)
+        .execute()
+    )
+
+    results = []
+    for row in matches.data or []:
+        job_row = supabase_admin.table("job_listings").select("*").eq("id", row["job_id"]).execute()
+        if not job_row.data:
+            continue
+        results.append(_build_summary(row, job_row.data[0]))
+
+    return results
+
+
 # ── GET /jobs/:id ─────────────────────────────────────────────────────────────
 
 @jobs_router.get("/{match_id}")
