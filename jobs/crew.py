@@ -20,6 +20,13 @@ deepseek_llm = LLM(
     base_url="https://api.deepseek.com",
 )
 
+# Thinking model — used for resume generation where depth and reasoning matter
+deepseek_reasoner_llm = LLM(
+    model="deepseek/deepseek-reasoner",
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url="https://api.deepseek.com",
+)
+
 
 # ── job_runs helpers ──────────────────────────────────────────────────────────
 
@@ -569,7 +576,7 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
     gen_content = ctx["gen_content"]
 
     # Agent: Resume Builder
-    builder = build_resume_builder(deepseek_llm)
+    builder = build_resume_builder(deepseek_reasoner_llm)
     build_task = build_resume_task(builder, gen_content, job)
     build_result = Crew(agents=[builder], tasks=[build_task], process=Process.sequential, verbose=False).kickoff()
 
@@ -583,7 +590,7 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
         raise ValueError("Resume builder returned invalid JSON")
 
     # Agent: Validator — cross-checks against gen_content, fixes issues
-    validator = build_resume_validator(deepseek_llm)
+    validator = build_resume_validator(deepseek_reasoner_llm)
     validate_task = build_resume_validation_task(validator, gen_content, job, resume_json)
     validate_result = Crew(agents=[validator], tasks=[validate_task], process=Process.sequential, verbose=False).kickoff()
 
@@ -709,7 +716,7 @@ def build_general_resume_and_cover(user_id: str) -> dict:
         raise ValueError("No published portfolio found")
     portfolio_id = portfolio_row.data[0]["id"]
 
-    builder = build_resume_builder(deepseek_llm)
+    builder = build_resume_builder(deepseek_reasoner_llm)
     build_task = build_general_resume_task(builder, gen_content, target_roles)
     build_result = Crew(
         agents=[builder],
@@ -727,7 +734,7 @@ def build_general_resume_and_cover(user_id: str) -> dict:
         logger.error("[build_general_resume_and_cover] builder returned non-JSON, raw=%s", raw[:300])
         raise ValueError("Resume builder returned invalid JSON")
 
-    validator = build_resume_validator(deepseek_llm)
+    validator = build_resume_validator(deepseek_reasoner_llm)
     validate_task = build_general_resume_validation_task(
         validator, gen_content, target_roles, resume_json
     )
