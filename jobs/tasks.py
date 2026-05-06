@@ -199,8 +199,29 @@ Return ONLY a JSON object matching this schema:
     )
 
 
+def _pick_top_projects(gen_content: dict, description: str, n: int = 3) -> list:
+    """Score and return the top-n projects most relevant to the JD."""
+    projects = gen_content.get("projects", []) or []
+    if not projects:
+        return []
+
+    desc_lower = description.lower()
+    scored = []
+    for p in projects:
+        stack = " ".join(p.get("techStack", []) or []).lower()
+        name = (p.get("name") or "").lower()
+        desc = (p.get("description") or "").lower()
+        text = f"{name} {stack} {desc}"
+        hits = sum(1 for word in text.split() if len(word) > 3 and word in desc_lower)
+        scored.append((hits, p))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [p for _, p in scored[:n]]
+
+
 def build_resume_task(agent: Agent, gen_content: dict, job: dict) -> Task:
     description = job.get("description") or ""
+    top_projects = _pick_top_projects(gen_content, description, n=3)
 
     return Task(
         description=f"""
@@ -225,14 +246,17 @@ Title: {job.get('title')}
 Company: {job.get('company')}
 Description: {description[:3000]}
 
+## Projects to include (ONLY these {len(top_projects)} — pre-selected for relevance)
+{json.dumps(top_projects, indent=2)}
+
 ## What you MUST do
 1. Include EVERY experience entry from the source portfolio — do not drop any role.
 2. Include ALL social links (linkedin, github, twitter, medium, website, etc.) from personal/social.
 3. Read the job description carefully. Identify the 10-15 most important technical keywords and tools the JD requires. Every keyword from the candidate's existing skills that appears in the JD MUST appear naturally at least once in the resume (summary or bullets).
-4. Rewrite basics.summary (4-5 sentences) to speak directly to this role — use the job's exact language, mirror their priorities, position the candidate as the answer to their specific problem.
+4. Rewrite basics.summary (3 sentences max, tight): sentence 1 — who the candidate is + years of experience + core domain; sentence 2 — the 2-3 most relevant technical strengths for THIS role using exact JD terminology; sentence 3 — one concrete impact statement (scale, business outcome, or metric).
 5. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and exact terminology from the JD. Every bullet must feel written for this role.
 6. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
-7. Pick 2-3 most relevant projects. Rewrite highlights to tie directly to the job needs using JD language.
+7. Projects: use ONLY the pre-selected projects above. For each: description must be exactly 1 sentence (what it does + the scale or outcome). highlights must be 2-3 bullets — each with an action verb, a specific technical detail from the JD's required stack, and a measurable outcome or scope. No vague phrases like "built a system" or "worked on".
 8. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
 9. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
 10. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
