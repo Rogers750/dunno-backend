@@ -47,6 +47,47 @@ All job IDs: <uuid1>, <uuid2>, ...
 
 
 def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None) -> Task:
+    from jobs.scoring import (
+        extract_candidate_years, extract_required_years,
+        calc_experience_score, calc_skills_score,
+    )
+
+    description = job.get("description") or ""
+
+    # ── Pre-calculated deterministic scores ──────────────────────────────────
+    candidate_years = extract_candidate_years(gen_content)
+    min_req, max_req = extract_required_years(description)
+    experience_score = calc_experience_score(candidate_years, min_req, max_req)
+    skills_score = calc_skills_score(gen_content, description)
+
+    # Build anchor block for the prompt
+    anchor_lines = []
+    if experience_score is not None:
+        req_str = f"{min_req}–{max_req}yr required" if max_req else f"{min_req}+yr required"
+        anchor_lines.append(
+            f"- experience: {experience_score} "
+            f"(candidate has {candidate_years}yr, {req_str}) — USE THIS EXACT VALUE"
+        )
+    if skills_score is not None:
+        anchor_lines.append(
+            f"- skills: {skills_score} "
+            f"(calculated from skill overlap with JD) — USE THIS EXACT VALUE"
+        )
+    anchors_block = (
+        "## Pre-calculated scores — copy these exact values into score_breakdown, do NOT change them\n"
+        + "\n".join(anchor_lines)
+        if anchor_lines
+        else ""
+    )
+
+    # Remaining dimensions DeepSeek must score itself
+    llm_dimensions = ["role", "education", "company_type"]
+    if experience_score is None:
+        llm_dimensions.insert(1, "experience")
+    if skills_score is None:
+        llm_dimensions.insert(1, "skills")
+
+    # ── Compensation ──────────────────────────────────────────────────────────
     has_salary = bool(job.get("salary_range"))
     has_ctc = bool(ctc.get("current_base_in_lakhs") and ctc.get("expected_base_in_lakhs"))
     compensation_note = (
@@ -55,17 +96,16 @@ def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, pref
         f"expected: {ctc.get('expected_base_in_lakhs')} LPA. "
         "Include compensation in score_breakdown."
         if has_salary and has_ctc
-        else "No salary data available for one or both parties. Omit compensation from score_breakdown entirely."
+        else "No salary data available. Omit compensation from score_breakdown entirely."
     )
 
+    # ── Preferences note ──────────────────────────────────────────────────────
     prefs = preferences or {}
     pref_lines = []
     if prefs.get("preferred_locations"):
         pref_lines.append(f"Preferred locations: {', '.join(prefs['preferred_locations'])}")
     if prefs.get("company_types"):
-        pref_lines.append(f"Preferred company types: {', '.join(prefs['company_types'])} — weight company_type dimension at 25% of final score")
-    if prefs.get("min_experience") is not None or prefs.get("max_experience") is not None:
-        pref_lines.append(f"Experience range: {prefs.get('min_experience', 0)}–{prefs.get('max_experience', '∞')} years")
+        pref_lines.append(f"Preferred company types: {', '.join(prefs['company_types'])} — weight company_type at 25% of final score")
     preferences_note = "\n".join(pref_lines) if pref_lines else "No specific preferences set."
 
     return Task(
@@ -79,26 +119,29 @@ Score how well this job matches the candidate's profile.
 Title: {job.get('title')}
 Company: {job.get('company')}
 Platform: {job.get('platform')}
-Description: {(job.get('description') or '')[:2000]}
+Description: {description[:2000]}
 
 ## Compensation
 {compensation_note}
 
-## Candidate Preferences (factor these into scoring weights)
+## Candidate Preferences
 {preferences_note}
 
-## Scoring Instructions
-Score each dimension 0–10 (float, one decimal):
-- role: how well the job title/responsibilities match the candidate's target roles and experience
-- skills: overlap between job requirements and candidate's proven skills
-- experience: years of experience required vs candidate's actual years
-- education: degree/field alignment
-- company_type: startup/enterprise/product/service fit based on candidate's background
-- compensation: only include if salary data is available for both parties
+{anchors_block}
 
-Final match_score = weighted average (you decide weights based on what matters most).
+## Your job — score ONLY these dimensions (0–10, one decimal):
+{chr(10).join(f"- {d}" for d in llm_dimensions)}
 
-Return ONLY a JSON object matching this schema:
+role: how well the job title/responsibilities match the candidate's target roles
+education: degree/field alignment
+company_type: startup/enterprise/product/service fit based on candidate's background
+
+## Final match_score
+Weighted average of ALL dimensions (including the pre-calculated ones).
+Weights: role=30%, skills=25%, experience=25%, education=10%, company_type=10%.
+If compensation is present, add it with 10% weight and reduce others proportionally.
+
+Return ONLY a JSON object:
 {{
   "match_score": <float>,
   "score_breakdown": {{
@@ -148,10 +191,41 @@ Return ONLY a JSON object matching this schema:
 
 
 def build_resume_task(agent: Agent, gen_content: dict, job: dict) -> Task:
+    from jobs.scoring import extract_jd_must_have_keywords
+
+    description = job.get("description") or ""
+
+    # Flatten candidate skills for keyword matching
+    skills_data = gen_content.get("skills", {})
+    candidate_skills: set[str] = set()
+    if isinstance(skills_data, dict):
+        for category in ["languages", "frameworks", "tools", "concepts"]:
+            for s in skills_data.get(category, []):
+                candidate_skills.add(s.lower().strip())
+    elif isinstance(skills_data, list):
+        for group in skills_data:
+            for s in (group.get("items") or []):
+                candidate_skills.add(s.lower().strip())
+
+    keywords = extract_jd_must_have_keywords(description, candidate_skills)
+    candidate_kws = [k for k in keywords if k.lower() in candidate_skills]
+    jd_only_kws = [k for k in keywords if k.lower() not in candidate_skills]
+
+    keywords_block = f"""## JD Keywords — ATS optimisation
+These are the most important terms from the job description.
+
+CANDIDATE ALREADY HAS these skills — weave them naturally into bullets and summary (must appear at least once each):
+{", ".join(candidate_kws) if candidate_kws else "none identified"}
+
+JD mentions these but candidate may not have them — do NOT fabricate; skip if not in source portfolio:
+{", ".join(jd_only_kws) if jd_only_kws else "none"}
+"""
+
     return Task(
         description=f"""
 Generate a complete, tailored resume JSON for this specific job application.
 Your goal: make this candidate look like the perfect hire for this exact role.
+This resume must pass ATS keyword scanning AND impress a human reader.
 
 ## Source Portfolio — use ALL of this, miss nothing
 {json.dumps(gen_content, indent=2)[:6000]}
@@ -168,15 +242,17 @@ Your goal: make this candidate look like the perfect hire for this exact role.
 ## Target Job
 Title: {job.get('title')}
 Company: {job.get('company')}
-Description: {(job.get('description') or '')[:3000]}
+Description: {description[:3000]}
+
+{keywords_block}
 
 ## What you MUST do
 1. Include EVERY experience entry from the source portfolio — do not drop any role.
 2. Include ALL social links (linkedin, github, twitter, medium, website, etc.) from personal/social.
-3. Rewrite basics.summary (4-5 sentences) to speak directly to this role — use the job's exact language, mirror their priorities, position the candidate as the answer to their specific problem.
-4. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and framing from the JD. Every bullet must feel written for this role.
+3. Rewrite basics.summary (4-5 sentences) to speak directly to this role — use the job's exact language, mirror their priorities, position the candidate as the answer to their specific problem. The summary MUST naturally include the top candidate-matching keywords above.
+4. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and exact terminology from the JD. Every bullet must feel written for this role. Each candidate-matching keyword must appear in at least one bullet across the experience section.
 5. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
-6. Pick 2-3 most relevant projects. Rewrite highlights to tie directly to the job needs.
+6. Pick 2-3 most relevant projects. Rewrite highlights to tie directly to the job needs using JD language.
 7. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
 8. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
 9. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
