@@ -414,6 +414,49 @@ async def generate_project_suggestions(
     return JSONResponse(status_code=202, content={"status": "building", "message": "Project suggestions started. Poll GET /jobs/{id}/projects for result."})
 
 
+# ── POST /jobs/:id/rescore ────────────────────────────────────────────────────
+
+@jobs_router.post("/{match_id}/rescore")
+async def rescore_match(
+    match_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Re-run the matcher for a specific job and update its score in the DB."""
+    user = _get_user(credentials)
+
+    match_row = supabase_admin.table("user_matched_jobs") \
+        .select("job_id") \
+        .eq("id", match_id).eq("user_id", user.id) \
+        .execute()
+    if not match_row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    job_id = match_row.data[0]["job_id"]
+    job_row = supabase_admin.table("job_listings").select("*").eq("id", job_id).execute()
+    if not job_row.data:
+        raise HTTPException(status_code=404, detail="Job listing not found")
+    job = job_row.data[0]
+
+    from jobs.crew import _load_user_context, _run_matcher, _save_match
+    ctx = _load_user_context(user.id)
+
+    match_result = _run_matcher(
+        ctx["gen_content"], ctx["ctc"], job,
+        ctx["preferences"], ctx["target_roles"]
+    )
+
+    supabase_admin.table("user_matched_jobs").update({
+        "match_score": match_result.match_score,
+        "score_breakdown": match_result.score_breakdown.model_dump(),
+    }).eq("id", match_id).execute()
+
+    return {
+        "match_id": match_id,
+        "match_score": match_result.match_score,
+        "score_breakdown": match_result.score_breakdown.model_dump(),
+    }
+
+
 # ── PATCH /profile/ctc ────────────────────────────────────────────────────────
 
 @profile_router.patch("/ctc")
