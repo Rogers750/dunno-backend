@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO)
 
-from routers import auth, resume, links, portfolio
+from routers import auth, resume, links, portfolio, profile
 from jobs.router import jobs_router, profile_router
 from jobs.cron import start_jobs_cron
 
@@ -42,6 +42,7 @@ app.include_router(links.router, prefix="/links", tags=["links"])
 app.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
 app.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
 app.include_router(profile_router, prefix="/profile", tags=["profile"])
+app.include_router(profile.router, prefix="/profile", tags=["profile"])
 
 
 @app.get("/health")
