@@ -259,12 +259,12 @@ def _run_job_search(target_roles: list, gen_content: dict) -> list[str]:
     return list(dict.fromkeys(uuids))
 
 
-def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None) -> MatchResult:
+def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None, target_roles: list | None = None) -> MatchResult:
     from jobs.agents import build_profile_matcher
     from jobs.tasks import build_match_task
 
     agent = build_profile_matcher(deepseek_llm)
-    task = build_match_task(agent, gen_content, ctc, job, preferences)
+    task = build_match_task(agent, gen_content, ctc, job, preferences, target_roles)
     crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
     result = crew.kickoff()
 
@@ -397,7 +397,7 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
             if not job:
                 continue
             try:
-                match_result = _run_matcher(gen_content, ctc, job, preferences)
+                match_result = _run_matcher(gen_content, ctc, job, preferences, target_roles)
                 scored.append((job_id, job, match_result))
                 logger.info(f"[jobs_crew] scored job={job_id} '{job['title']}' score={match_result.match_score:.1f}")
             except Exception as e:
@@ -425,13 +425,20 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
             return score
 
         scored.sort(key=lambda x: _preference_score(x[0], x[1], x[2]), reverse=True)
-        top_jobs = scored[:limit]
+
+        # Drop anything below 6.0 — not worth showing to the user
+        MIN_SCORE = 6.0
+        qualified = [(jid, job, mr) for jid, job, mr in scored if mr.match_score >= MIN_SCORE]
+        top_jobs = qualified[:limit]
 
         progress["completed_agents"].append("Agent 2 — Profile Matcher")
         progress["jobs_found"] = len(scored)
         _update_progress(run_id, progress)
 
-        logger.info(f"[jobs_crew] scored {len(scored)} jobs, processing top {len(top_jobs)}")
+        logger.info(
+            f"[jobs_crew] scored {len(scored)} jobs, "
+            f"{len(qualified)} above {MIN_SCORE}, processing top {len(top_jobs)}"
+        )
 
         # ── Pass 2: Agents 3–4 on top `limit` jobs (company research + projects) ──
         processed = 0

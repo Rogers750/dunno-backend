@@ -46,7 +46,7 @@ All job IDs: <uuid1>, <uuid2>, ...
     )
 
 
-def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None) -> Task:
+def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None, target_roles: list | None = None) -> Task:
     from jobs.scoring import extract_candidate_years, extract_required_years, calc_experience_score
 
     description = job.get("description") or ""
@@ -103,9 +103,14 @@ def build_match_task(agent: Agent, gen_content: dict, ctc: dict, job: dict, pref
     personal_json = json.dumps(gen_content.get("personal", {}), indent=2)
     education_json = json.dumps(gen_content.get("education", []), indent=2)
 
+    target_roles_str = ", ".join(target_roles) if target_roles else "Not specified"
+
     return Task(
         description=f"""
 Score how well this job matches the candidate's profile.
+
+## Candidate Target Roles (what they are actively looking for)
+{target_roles_str}
 
 ## Candidate Skills (complete — use this for skills scoring)
 {skills_json}
@@ -135,7 +140,7 @@ Description: {description[:2500]}
 {chr(10).join(f"- {d}" for d in llm_dimensions)}
 
 Scoring guidance:
-- role: how well the job title and responsibilities match the candidate's target roles and past job titles
+- role: how well the job title and responsibilities match the candidate's TARGET ROLES listed above and their past job titles. Score 9-10 if the job is exactly what they're targeting, 6-8 if closely related, below 5 if significantly different domain
 - skills: look at the candidate's full skills list above vs the technologies/tools explicitly required in the JD. Score high (8-10) if the candidate has the core required stack, medium (5-7) if partial overlap, low (1-4) if major required skills are missing
 - education: degree level and field alignment with job requirements
 - company_type: does the candidate's background (startup/product/enterprise/service) match this company's type
