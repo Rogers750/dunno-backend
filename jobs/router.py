@@ -370,6 +370,50 @@ async def generate_cover_letter(
     return JSONResponse(status_code=202, content={"status": "building", "message": "Cover letter generation started. Poll GET /jobs/{id}/cover for result."})
 
 
+# ── POST /jobs/:id/company ────────────────────────────────────────────────────
+
+@jobs_router.post("/{match_id}/company")
+async def generate_company_info(
+    match_id: str,
+    background_tasks: BackgroundTasks,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Trigger on-demand Glassdoor lookup for a matched job's company. Poll GET /jobs/:id/company for result."""
+    user = _get_user(credentials)
+
+    row = supabase_admin.table("user_matched_jobs").select("id").eq("id", match_id).eq("user_id", user.id).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    from jobs.crew import build_company_for_match
+    from fastapi.responses import JSONResponse
+
+    background_tasks.add_task(build_company_for_match, user_id=user.id, match_id=match_id)
+    return JSONResponse(status_code=202, content={"status": "building", "message": "Company research started. Poll GET /jobs/{id}/company for result."})
+
+
+# ── POST /jobs/:id/projects ───────────────────────────────────────────────────
+
+@jobs_router.post("/{match_id}/projects")
+async def generate_project_suggestions(
+    match_id: str,
+    background_tasks: BackgroundTasks,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Trigger on-demand project suggestions for a matched job. Poll GET /jobs/:id/projects for result."""
+    user = _get_user(credentials)
+
+    row = supabase_admin.table("user_matched_jobs").select("id").eq("id", match_id).eq("user_id", user.id).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    from jobs.crew import build_projects_for_match
+    from fastapi.responses import JSONResponse
+
+    background_tasks.add_task(build_projects_for_match, user_id=user.id, match_id=match_id)
+    return JSONResponse(status_code=202, content={"status": "building", "message": "Project suggestions started. Poll GET /jobs/{id}/projects for result."})
+
+
 # ── PATCH /profile/ctc ────────────────────────────────────────────────────────
 
 @profile_router.patch("/ctc")

@@ -200,35 +200,7 @@ Return ONLY a JSON object matching this schema:
 
 
 def build_resume_task(agent: Agent, gen_content: dict, job: dict) -> Task:
-    from jobs.scoring import extract_jd_must_have_keywords
-
     description = job.get("description") or ""
-
-    # Flatten candidate skills for keyword matching
-    skills_data = gen_content.get("skills", {})
-    candidate_skills: set[str] = set()
-    if isinstance(skills_data, dict):
-        for category in ["languages", "frameworks", "tools", "concepts"]:
-            for s in skills_data.get(category, []):
-                candidate_skills.add(s.lower().strip())
-    elif isinstance(skills_data, list):
-        for group in skills_data:
-            for s in (group.get("items") or []):
-                candidate_skills.add(s.lower().strip())
-
-    keywords = extract_jd_must_have_keywords(description, candidate_skills)
-    candidate_kws = [k for k in keywords if k.lower() in candidate_skills]
-    jd_only_kws = [k for k in keywords if k.lower() not in candidate_skills]
-
-    keywords_block = f"""## JD Keywords — ATS optimisation
-These are the most important terms from the job description.
-
-CANDIDATE ALREADY HAS these skills — weave them naturally into bullets and summary (must appear at least once each):
-{", ".join(candidate_kws) if candidate_kws else "none identified"}
-
-JD mentions these but candidate may not have them — do NOT fabricate; skip if not in source portfolio:
-{", ".join(jd_only_kws) if jd_only_kws else "none"}
-"""
 
     return Task(
         description=f"""
@@ -253,18 +225,17 @@ Title: {job.get('title')}
 Company: {job.get('company')}
 Description: {description[:3000]}
 
-{keywords_block}
-
 ## What you MUST do
 1. Include EVERY experience entry from the source portfolio — do not drop any role.
 2. Include ALL social links (linkedin, github, twitter, medium, website, etc.) from personal/social.
-3. Rewrite basics.summary (4-5 sentences) to speak directly to this role — use the job's exact language, mirror their priorities, position the candidate as the answer to their specific problem. The summary MUST naturally include the top candidate-matching keywords above.
-4. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and exact terminology from the JD. Every bullet must feel written for this role. Each candidate-matching keyword must appear in at least one bullet across the experience section.
-5. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
-6. Pick 2-3 most relevant projects. Rewrite highlights to tie directly to the job needs using JD language.
-7. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
-8. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
-9. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
+3. Read the job description carefully. Identify the 10-15 most important technical keywords and tools the JD requires. Every keyword from the candidate's existing skills that appears in the JD MUST appear naturally at least once in the resume (summary or bullets).
+4. Rewrite basics.summary (4-5 sentences) to speak directly to this role — use the job's exact language, mirror their priorities, position the candidate as the answer to their specific problem.
+5. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and exact terminology from the JD. Every bullet must feel written for this role.
+6. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
+7. Pick 2-3 most relevant projects. Rewrite highlights to tie directly to the job needs using JD language.
+8. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
+9. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
+10. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
 
 ## Hard rules — never break these
 - NEVER add a technology, tool, or framework the candidate hasn't used.

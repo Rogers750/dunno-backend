@@ -223,13 +223,7 @@ def _get_relevant_unmatched_from_db(
     return candidates if len(candidates) >= min_count else []
 
 
-def _save_match(
-    user_id: str,
-    job_id: str,
-    match_result: MatchResult,
-    company_info: CompanyInfo,
-    project_suggestions: ProjectSuggestions,
-) -> None:
+def _save_match(user_id: str, job_id: str, match_result: MatchResult) -> None:
     supabase_admin.table("user_matched_jobs").insert({
         "user_id": user_id,
         "job_id": job_id,
@@ -237,8 +231,8 @@ def _save_match(
         "score_breakdown": match_result.score_breakdown.model_dump(),
         "resume_json": None,
         "cover_letter": None,
-        "project_suggestions": project_suggestions.model_dump(),
-        "company_info": company_info.model_dump(),
+        "project_suggestions": None,
+        "company_info": None,
         "status": "new",
     }).execute()
 
@@ -259,9 +253,24 @@ def _run_job_search(target_roles: list, gen_content: dict) -> list[str]:
     return list(dict.fromkeys(uuids))
 
 
+def _calc_match_score(breakdown: ScoreBreakdown) -> float:
+    """Calculate match_score from breakdown in Python — never trust LLM arithmetic."""
+    score = (
+        breakdown.role        * 0.30 +
+        breakdown.skills      * 0.25 +
+        breakdown.experience  * 0.25 +
+        breakdown.education   * 0.10 +
+        breakdown.company_type * 0.10
+    )
+    if breakdown.compensation is not None:
+        score = score * 0.90 + breakdown.compensation * 0.10
+    return round(score, 1)
+
+
 def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | None = None, target_roles: list | None = None) -> MatchResult:
     from jobs.agents import build_profile_matcher
     from jobs.tasks import build_match_task
+    from jobs.scoring import extract_candidate_years, extract_required_years, calc_experience_score
 
     agent = build_profile_matcher(deepseek_llm)
     task = build_match_task(agent, gen_content, ctc, job, preferences, target_roles)
@@ -269,14 +278,34 @@ def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | No
     result = crew.kickoff()
 
     if hasattr(result, "pydantic") and result.pydantic:
-        return result.pydantic
-    try:
-        return MatchResult(**json.loads(result.raw))
-    except Exception:
-        return MatchResult(
-            match_score=5.0,
-            score_breakdown=ScoreBreakdown(role=5.0, skills=5.0, experience=5.0, education=5.0, company_type=5.0),
+        match = result.pydantic
+    else:
+        try:
+            match = MatchResult(**json.loads(result.raw))
+        except Exception:
+            match = MatchResult(
+                match_score=5.0,
+                score_breakdown=ScoreBreakdown(role=5.0, skills=5.0, experience=5.0, education=5.0, company_type=5.0),
+            )
+
+    # ── Enforce experience anchor — override if DeepSeek drifted ─────────────
+    description = job.get("description") or ""
+    candidate_years = extract_candidate_years(gen_content)
+    min_req, max_req = extract_required_years(description)
+    experience_score = calc_experience_score(candidate_years, min_req, max_req)
+
+    if experience_score is not None and match.score_breakdown.experience != experience_score:
+        logger.info(
+            f"[matcher] overriding experience score: "
+            f"DeepSeek={match.score_breakdown.experience} → enforced={experience_score}"
         )
+        match.score_breakdown.experience = experience_score
+
+    # ── Recalculate match_score in Python — never trust LLM arithmetic ───────
+    match.match_score = _calc_match_score(match.score_breakdown)
+    logger.info(f"[matcher] final score={match.match_score} breakdown={match.score_breakdown}")
+
+    return match
 
 
 def _run_company_researcher(company_name: str) -> CompanyInfo:
@@ -403,28 +432,8 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
             except Exception as e:
                 logger.error(f"[jobs_crew] matcher failed job={job_id}: {e}", exc_info=True)
 
-        # Apply preference-based filtering before ranking
-        preferred_locations = [l.lower() for l in (preferences.get("preferred_locations") or [])]
-        preferred_types = [t.lower() for t in (preferences.get("company_types") or [])]
-        def _preference_score(job_id: str, job: dict, match: MatchResult) -> float:
-            score = match.match_score
-            breakdown = match.score_breakdown
-
-            # Location — if preferences set, soft-penalise mismatches (-1.5)
-            if preferred_locations:
-                loc = (job.get("location") or "").lower()
-                remote_ok = "remote" in preferred_locations
-                location_match = any(pl in loc for pl in preferred_locations) or (remote_ok and "remote" in loc)
-                if not location_match:
-                    score -= 1.5
-
-            # Company type — if preferences set, boost weight of company_type dimension
-            if preferred_types and breakdown.company_type is not None:
-                score = score * 0.85 + breakdown.company_type * 0.15
-
-            return score
-
-        scored.sort(key=lambda x: _preference_score(x[0], x[1], x[2]), reverse=True)
+        # Sort by match_score — vector search + LLM scoring is enough, no re-ranking needed
+        scored.sort(key=lambda x: x[2].match_score, reverse=True)
 
         # Drop anything below 6.0 — not worth showing to the user
         MIN_SCORE = 6.0
@@ -437,44 +446,19 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
 
         logger.info(
             f"[jobs_crew] scored {len(scored)} jobs, "
-            f"{len(qualified)} above {MIN_SCORE}, processing top {len(top_jobs)}"
+            f"{len(qualified)} above {MIN_SCORE}, saving top {len(top_jobs)}"
         )
 
-        # ── Pass 2: Agents 3–4 on top `limit` jobs (company research + projects) ──
+        # ── Save top matches — company/projects fetched on-demand by user ────
         processed = 0
         for job_id, job, match_result in top_jobs:
-            logger.info(f"[jobs_crew] processing job={job_id} '{job['title']}' @ '{job['company']}' score={match_result.match_score:.1f}")
-
             try:
-                # Agent 3
-                progress["current_step"] = 3
-                progress["current_agent"] = "Agent 3 — Company Researcher"
-                _update_progress(run_id, progress)
-                company_info = _run_company_researcher(job["company"])
-
-                # Agent 4
-                progress["current_step"] = 4
-                progress["current_agent"] = "Agent 4 — Project Advisor"
-                _update_progress(run_id, progress)
-                project_suggestions = _run_project_advisor(gen_content, job)
-
-                _save_match(
-                    user_id=user_id,
-                    job_id=job_id,
-                    match_result=match_result,
-                    company_info=company_info,
-                    project_suggestions=project_suggestions,
-                )
-
+                _save_match(user_id=user_id, job_id=job_id, match_result=match_result)
                 processed += 1
                 progress["jobs_processed"] = processed
-                progress["current_step"] = 5
-                progress["current_agent"] = f"Completed job {processed}/{len(top_jobs)}"
-                progress["completed_agents"] = []
+                progress["current_agent"] = f"Saved {processed}/{len(top_jobs)} matches"
                 _update_progress(run_id, progress)
-
                 logger.info(f"[jobs_crew] saved match job={job_id} score={match_result.match_score:.1f}")
-
             except Exception as e:
                 logger.error(f"[jobs_crew] failed job={job_id}: {e}", exc_info=True)
                 continue
@@ -578,3 +562,43 @@ def build_cover_for_match(user_id: str, match_id: str) -> str:
     supabase_admin.table("user_matched_jobs").update({"cover_letter": cover_letter}).eq("id", match_id).execute()
     logger.info(f"[build_cover] saved cover letter match_id={match_id}")
     return cover_letter
+
+
+# ── On-demand company researcher ──────────────────────────────────────────────
+
+def build_company_for_match(user_id: str, match_id: str) -> dict:
+    """Fetch Glassdoor data for a matched job's company. Called on demand."""
+    match = supabase_admin.table("user_matched_jobs").select("job_id").eq("id", match_id).eq("user_id", user_id).execute()
+    if not match.data:
+        raise ValueError("Match not found")
+
+    job = _fetch_job(match.data[0]["job_id"])
+    if not job:
+        raise ValueError("Job listing not found")
+
+    company_info = _run_company_researcher(job["company"])
+    supabase_admin.table("user_matched_jobs").update({"company_info": company_info.model_dump()}).eq("id", match_id).execute()
+    logger.info(f"[build_company] saved company info match_id={match_id}")
+    return company_info.model_dump()
+
+
+# ── On-demand project advisor ─────────────────────────────────────────────────
+
+def build_projects_for_match(user_id: str, match_id: str) -> dict:
+    """Generate project suggestions for a matched job. Called on demand."""
+    ctx = _load_user_context(user_id)
+    if not ctx:
+        raise ValueError("No portfolio or profile found")
+
+    match = supabase_admin.table("user_matched_jobs").select("job_id").eq("id", match_id).eq("user_id", user_id).execute()
+    if not match.data:
+        raise ValueError("Match not found")
+
+    job = _fetch_job(match.data[0]["job_id"])
+    if not job:
+        raise ValueError("Job listing not found")
+
+    suggestions = _run_project_advisor(ctx["gen_content"], job)
+    supabase_admin.table("user_matched_jobs").update({"project_suggestions": suggestions.model_dump()}).eq("id", match_id).execute()
+    logger.info(f"[build_projects] saved project suggestions match_id={match_id}")
+    return suggestions.model_dump()
