@@ -107,24 +107,82 @@ def _fetch_job(job_id: str) -> Optional[dict]:
     return result.data[0] if result.data else None
 
 
+def _build_profile_text(gen_content: dict, target_roles: list[str]) -> str:
+    """Build a text representation of the candidate profile for embedding."""
+    skills_data = gen_content.get("skills", {})
+    all_skills = []
+    if isinstance(skills_data, dict):
+        for cat in ["languages", "frameworks", "tools", "concepts"]:
+            all_skills.extend(skills_data.get(cat, []))
+
+    experience = gen_content.get("experience", [])
+    exp_titles = [f"{e.get('role', '')} at {e.get('company', '')}" for e in experience[:5]]
+
+    personal = gen_content.get("personal", {})
+    bio = personal.get("bio") or personal.get("summary") or ""
+
+    return (
+        f"Target roles: {', '.join(target_roles)}\n"
+        f"Skills: {', '.join(all_skills[:30])}\n"
+        f"Experience: {', '.join(exp_titles)}\n"
+        f"Bio: {bio[:500]}"
+    )
+
+
+def _generate_profile_embedding(gen_content: dict, target_roles: list[str]) -> Optional[list]:
+    """Generate embedding for the user's profile. Used for vector similarity search."""
+    try:
+        from jobs.tools import _get_voyage_client
+        text = _build_profile_text(gen_content, target_roles)
+        client = _get_voyage_client()
+        result = client.embed([text], model="voyage-3")
+        return result.embeddings[0]
+    except Exception as e:
+        logger.warning(f"[crew] profile embedding failed: {e}")
+        return None
+
+
 def _get_relevant_unmatched_from_db(
     target_roles: list[str],
     matched_ids: set,
     preferences: dict,
     candidate_years: float,
+    gen_content: dict,
     min_count: int = 15,
-    days: int = 7,
 ) -> list[str]:
     """
-    Check job_listings for recent, role-relevant, unmatched jobs.
-    Filters by: title keywords, location preference, min_experience vs candidate years.
+    Find relevant unmatched jobs using vector similarity search.
+    Falls back to keyword filter if embeddings aren't available.
     Returns IDs if >= min_count found, else empty list (triggers fresh scrape).
     """
-    from datetime import datetime, timezone, timedelta
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-
-    # Allow 1.5yr buffer — so 3.5yr candidate can see jobs requiring up to 5yr
     exp_ceiling = candidate_years + 1.5
+    preferred_locs = preferences.get("preferred_locations") or []
+    exclude_ids = list(matched_ids)
+
+    # ── Vector search (primary path) ─────────────────────────────────────────
+    profile_embedding = _generate_profile_embedding(gen_content, target_roles)
+    if profile_embedding:
+        try:
+            result = supabase_admin.rpc("match_jobs", {
+                "query_embedding": profile_embedding,
+                "exclude_ids": exclude_ids,
+                "exp_ceiling": exp_ceiling,
+                "preferred_locs": preferred_locs,
+                "match_count": 50,
+            }).execute()
+
+            candidates = [row["id"] for row in (result.data or [])]
+            logger.info(
+                f"[crew] vector search: {len(candidates)} candidates "
+                f"(candidate_years={candidate_years}, exp_ceiling={exp_ceiling})"
+            )
+            return candidates if len(candidates) >= min_count else []
+        except Exception as e:
+            logger.warning(f"[crew] vector search failed, falling back to keyword: {e}")
+
+    # ── Keyword fallback (for jobs with no embedding yet) ────────────────────
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
     recent = (
         supabase_admin.table("job_listings")
@@ -135,7 +193,6 @@ def _get_relevant_unmatched_from_db(
         .execute()
     )
 
-    # Build role keywords — only expand multi-word roles if result is >= 2 words
     _GENERIC = {"engineer", "developer", "manager", "analyst", "lead", "architect", "consultant"}
     role_keywords = [r.lower().strip() for r in target_roles if r]
     expanded = set()
@@ -144,12 +201,10 @@ def _get_relevant_unmatched_from_db(
         parts = role.split()
         if len(parts) > 1:
             tail = " ".join(parts[1:])
-            # Only add if the tail is not a single generic word
             if len(tail.split()) > 1 or tail not in _GENERIC:
                 expanded.add(tail)
 
-    preferred_locations = [l.lower() for l in (preferences.get("preferred_locations") or [])]
-
+    preferred_locations = [l.lower() for l in preferred_locs]
     candidates = []
     for row in (recent.data or []):
         if row["id"] in matched_ids:
@@ -164,10 +219,7 @@ def _get_relevant_unmatched_from_db(
                 continue
         candidates.append(row["id"])
 
-    logger.info(
-        f"[crew] DB pool check: {len(candidates)} relevant unmatched jobs "
-        f"(candidate_years={candidate_years}, exp_ceiling={exp_ceiling}, need {min_count} to skip scrape)"
-    )
+    logger.info(f"[crew] keyword fallback: {len(candidates)} candidates")
     return candidates if len(candidates) >= min_count else []
 
 
@@ -309,7 +361,7 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         preferences = ctx["preferences"]
         from jobs.scoring import extract_candidate_years
         candidate_years = extract_candidate_years(gen_content)
-        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences, candidate_years)
+        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences, candidate_years, gen_content)
         if db_ids:
             new_ids = db_ids
             logger.info(f"[jobs_crew] skipping Apify — using {len(new_ids)} jobs from DB")

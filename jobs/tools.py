@@ -12,6 +12,30 @@ from database.supabase_client import supabase_admin
 
 logger = logging.getLogger(__name__)
 
+_voyage_client = None
+
+def _get_voyage_client():
+    global _voyage_client
+    if _voyage_client is None:
+        import voyageai
+        api_key = os.getenv("VOYAGE_JOB_SEARCH_VECTOR_SECRET")
+        if not api_key:
+            raise ValueError("VOYAGE_JOB_SEARCH_VECTOR_SECRET is not set")
+        _voyage_client = voyageai.Client(api_key=api_key)
+    return _voyage_client
+
+
+def _generate_job_embedding(title: str, company: str, description: str) -> Optional[list]:
+    """Generate 1024-dim embedding for a job. Returns None on failure."""
+    try:
+        text = f"{title} at {company}\n{(description or '')[:3000]}"
+        client = _get_voyage_client()
+        result = client.embed([text], model="voyage-3")
+        return result.embeddings[0]
+    except Exception as e:
+        logger.warning(f"[embedding] failed to generate job embedding: {e}")
+        return None
+
 # ── Apify actor IDs (override via env if you swap actors) ────────────────────
 # These point to commonly used public actors on Apify. Verify/update IDs in
 # your Apify console if a different actor version is preferred.
@@ -65,6 +89,8 @@ def _upsert_job(
     min_experience = min_exp if min_exp > 0 else None
 
     try:
+        embedding = _generate_job_embedding(title, company, description or "")
+
         result = supabase_admin.table("job_listings").insert({
             "job_hash": job_hash,
             "title": title,
@@ -78,6 +104,7 @@ def _upsert_job(
             "expires_at": expires_at,
             "is_live": True,
             "min_experience": min_experience,
+            "embedding_vector": embedding,
         }).execute()
         return result.data[0]["id"] if result.data else None
     except Exception as e:
