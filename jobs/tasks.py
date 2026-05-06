@@ -256,7 +256,7 @@ Description: {description[:3000]}
 4. Rewrite basics.summary (3 sentences max, tight): sentence 1 — who the candidate is + years of experience + core domain; sentence 2 — the 2-3 most relevant technical strengths for THIS role using exact JD terminology; sentence 3 — one concrete impact statement (scale, business outcome, or metric).
 5. Rewrite experience bullets to surface achievements most relevant to this JD. Use action verbs and exact terminology from the JD. Every bullet must feel written for this role.
 6. Reorder skills categories — put what the JD cares about first. Include ALL skills from source.
-7. Projects: use ONLY the pre-selected projects above. For each: description must be exactly 1 sentence (what it does + the scale or outcome). highlights must be 2-3 bullets — each with an action verb, a specific technical detail from the JD's required stack, and a measurable outcome or scope. No vague phrases like "built a system" or "worked on".
+7. Projects: use ONLY the pre-selected projects above. For each: write a description of exactly 1-2 sentences that are dense and specific — cover what the project does, the tech used (mirroring JD keywords where possible), and the scale or outcome. No vague phrases like "built a system" or "worked on". Leave highlights as an empty array [].
 8. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
 9. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
 10. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
