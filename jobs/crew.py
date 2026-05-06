@@ -294,12 +294,22 @@ def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | No
     min_req, max_req = extract_required_years(description)
     experience_score = calc_experience_score(candidate_years, min_req, max_req)
 
+    logger.info(
+        f"[matcher] experience anchor: candidate={candidate_years}yr, "
+        f"jd_required={min_req}-{max_req}yr, anchor={experience_score}, "
+        f"deepseek={match.score_breakdown.experience}"
+    )
+
     if experience_score is not None and match.score_breakdown.experience != experience_score:
         logger.info(
             f"[matcher] overriding experience score: "
             f"DeepSeek={match.score_breakdown.experience} → enforced={experience_score}"
         )
         match.score_breakdown.experience = experience_score
+    elif experience_score is None:
+        logger.warning(
+            f"[matcher] could not parse required years from JD — using DeepSeek score {match.score_breakdown.experience}"
+        )
 
     # ── Recalculate match_score in Python — never trust LLM arithmetic ───────
     match.match_score = _calc_match_score(match.score_breakdown)
