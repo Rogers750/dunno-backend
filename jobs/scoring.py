@@ -31,6 +31,9 @@ def extract_candidate_years(gen_content: dict) -> float:
     now = datetime.now()
     total_months = 0
 
+    if experience:
+        logger.info(f"[scoring] first experience entry keys: {list(experience[0].keys())}")
+
     for role in experience:
         start_str = role.get("startDate") or role.get("sortDate") or ""
         end_str = role.get("endDate") or role.get("endSortDate") or ""
