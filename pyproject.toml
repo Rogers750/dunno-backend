@@ -1,0 +1,20 @@
+[project]
+name = "dunnoai-backned"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "apify-client>=2.5.0",
+    "apscheduler>=3.10.0,<4.0",
+    "crewai>=1.14.4",
+    "fastapi>=0.136.1",
+    "httpx>=0.28.1",
+    "pydantic[email]>=2.12.5",
+    "pypdf>=6.10.2",
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.27",
+    "supabase>=2.29.0",
+    "uvicorn[standard]>=0.46.0",
+    "voyageai>=0.3.7",
+]

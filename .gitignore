@@ -6,3 +6,4 @@ node_modules
 .claude/
 README.md
 __pycache__/
+.venv/
