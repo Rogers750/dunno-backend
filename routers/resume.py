@@ -93,3 +93,54 @@ async def get_resume(credentials: HTTPAuthorizationCredentials = Depends(securit
     if not result.data:
         raise HTTPException(status_code=404, detail="No resume found")
     return result.data[0]
+
+
+@router.get("/general")
+async def get_general_resume_and_cover(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    user = _get_user(credentials)
+    user_supabase = _get_user_supabase(credentials)
+    result = (
+        user_supabase.table("portfolios")
+        .select("general_resume_json, general_cover_letter")
+        .eq("user_id", user.id)
+        .eq("published", True)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="No published portfolio found")
+
+    row = result.data[0]
+    resume_json = row.get("general_resume_json")
+    cover_letter = row.get("general_cover_letter")
+    if not resume_json and not cover_letter:
+        raise HTTPException(status_code=404, detail="No saved general resume or cover letter found")
+
+    return {
+        "resume_json": resume_json or {},
+        "cover_letter": cover_letter or "",
+    }
+
+
+@router.post("/general")
+async def generate_general_resume_and_cover(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """
+    Build an all-purpose resume JSON and a reusable cover letter from the user's
+    published portfolio, without tying the output to a specific company/job.
+    """
+    user = _get_user(credentials)
+    logger.info(f"[resume/general] generating materials for user={user.id}")
+
+    from jobs.crew import build_general_resume_and_cover
+
+    try:
+        return build_general_resume_and_cover(user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[resume/general] generation failed user={user.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate resume and cover letter")

@@ -236,10 +236,12 @@ Description: {description[:3000]}
 8. Use subjective framing freely: leadership, ownership, scale, cross-functional impact — if grounded in real experience.
 9. Mirror the seniority tone of the job title (staff/senior/lead/principal — match their language).
 10. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
+11. Preserve the candidate's original experience role titles from the source portfolio. Do NOT rename titles into cleaner, broader, or more marketable variants.
 
 ## Hard rules — never break these
 - NEVER add a technology, tool, or framework the candidate hasn't used.
 - NEVER invent metrics, company names, or roles.
+- NEVER rewrite experience job titles into nicer-sounding variants. Keep role naming consistent with the source portfolio.
 - NEVER fabricate certifications or education.
 - NEVER leave experience, skills, or education arrays empty.
 - certifications, publications, achievements: copy exactly from source portfolio if present. If source has none, return empty array []. ALWAYS include these keys.
@@ -397,6 +399,7 @@ Company: {job.get('company')}
 5. SUMMARY — must be specific to the target job, not generic. If it's generic, rewrite it.
 6. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
 7. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered by JD relevance.
+8. ROLE TITLE CONSISTENCY — keep each experience role title aligned with the original source portfolio naming. Do not embellish or normalize titles unless the source itself differs.
 
 Fix every issue you find. Return ONLY the corrected resume JSON. No explanation, no markdown.
 """,
@@ -405,3 +408,162 @@ Fix every issue you find. Return ONLY the corrected resume JSON. No explanation,
     )
 
 
+def build_general_resume_task(agent: Agent, gen_content: dict, target_roles: list[str]) -> Task:
+    roles_str = ", ".join(target_roles) if target_roles else "software engineer"
+
+    return Task(
+        description=f"""
+Generate a complete, all-purpose resume JSON for this candidate.
+This is NOT for one company or one JD. It should work broadly across applications
+for these target roles: {roles_str}
+
+## Source Portfolio — use ALL of this, miss nothing
+{json.dumps(gen_content, indent=2)[:6000]}
+
+## Certifications (copy exactly into resume)
+{json.dumps(gen_content.get('certifications', []))}
+
+## Publications (copy exactly into resume)
+{json.dumps(gen_content.get('publications', []))}
+
+## Achievements (copy exactly into resume)
+{json.dumps(gen_content.get('achievements', []))}
+
+## What you MUST do
+1. Include EVERY experience entry from the source portfolio — do not drop any role.
+2. Include ALL social links (linkedin, github, twitter, medium, website, etc.) from personal/social.
+3. Rewrite basics.summary as a strong all-purpose summary for the target roles above. It must be role-specific, keyword-rich, and reusable across many applications without naming any company.
+4. Rewrite experience bullets to emphasise broad strengths: ownership, scale, systems design, execution, impact, and technologies repeatedly used in the source.
+5. Reorder skills categories so the most marketable and role-relevant categories appear first. Include ALL skills from source.
+6. Pick the 2-3 strongest projects for the target roles. Rewrite highlights to show relevance across those roles.
+7. Keep the tone aligned with the candidate's actual seniority and most likely target roles.
+8. Populate sortDate as YYYY-MM for all entries. Set endSortDate to "9999-12" for current roles.
+9. Preserve the candidate's original experience role titles from the source portfolio. Do NOT rename titles into more generic or more polished variants.
+
+## Hard rules — never break these
+- NEVER add a technology, tool, or framework the candidate hasn't used.
+- NEVER invent metrics, company names, or roles.
+- NEVER rewrite experience job titles into nicer-sounding variants. Keep role naming consistent with the source portfolio.
+- NEVER fabricate certifications or education.
+- NEVER leave experience, skills, or education arrays empty.
+- NEVER mention a specific employer or job description outside the candidate's real history.
+- certifications, publications, achievements: copy exactly from source portfolio if present. If source has none, return empty array []. ALWAYS include these keys.
+
+Return ONLY the resume JSON. No markdown, no explanation. Schema:
+{{
+  "basics": {{
+    "name": "", "title": "", "email": "", "phone": "", "location": "",
+    "summary": "", "linkedin": "", "github": "", "portfolio": ""
+  }},
+  "experience": [{{
+    "company": "", "role": "", "location": "", "employmentType": "",
+    "isRemote": false, "startDate": "", "endDate": "",
+    "sortDate": "YYYY-MM", "endSortDate": "YYYY-MM or 9999-12",
+    "bullets": []
+  }}],
+  "education": [{{
+    "institution": "", "degree": "", "startDate": "", "endDate": "",
+    "sortDate": "YYYY-MM", "endSortDate": "YYYY-MM", "gpa": "", "honors": "", "activities": ""
+  }}],
+  "skills": {{
+    "languages": [], "frameworks": [], "tools": [], "concepts": []
+  }},
+  "projects": [{{
+    "name": "", "description": "", "techStack": [], "link": "",
+    "startDate": "", "endDate": "", "sortDate": "YYYY-MM", "endSortDate": "YYYY-MM",
+    "highlights": []
+  }}],
+  "certifications": [{{ "name": "", "issuer": "", "year": "" }}],
+  "publications": [{{ "title": "", "url": "", "year": "" }}],
+  "achievements": ["string"],
+  "languages": []
+}}
+""",
+        expected_output="A complete, valid JSON resume object for broad applications.",
+        agent=agent,
+    )
+
+
+def build_general_resume_validation_task(
+    agent: Agent,
+    gen_content: dict,
+    target_roles: list[str],
+    resume_json: dict,
+) -> Task:
+    source_skills = []
+    for group in gen_content.get("skills", []):
+        source_skills.extend(group.get("items", []) if isinstance(group, dict) else [])
+    source_companies = [e.get("company", "") for e in gen_content.get("experience", [])]
+    source_projects = [p.get("name", "") for p in gen_content.get("projects", [])]
+    roles_str = ", ".join(target_roles) if target_roles else "software engineer"
+
+    return Task(
+        description=f"""
+Audit this generated all-purpose resume JSON and fix any issues. Return a corrected, complete resume JSON.
+
+## Original Portfolio (source of truth)
+Experience companies: {source_companies}
+Projects: {source_projects}
+All known skills/tools: {source_skills}
+Social/personal: {json.dumps(gen_content.get('personal', {}), indent=2)}
+
+## Target Roles
+{roles_str}
+
+## Generated Resume to Audit
+{json.dumps(resume_json, indent=2)[:5000]}
+
+## What to check and fix
+1. COMPLETENESS — every experience from the source must appear. If any role is missing, add it back from the original portfolio.
+2. NO INVENTED TECH — check every skill, tool, and technology in the resume against the known skills list. Remove any that don't appear in the source.
+3. NO EMPTY ARRAYS — experience bullets, skills lists, and project highlights must not be empty. Populate from source if needed.
+4. SOCIAL LINKS — all links (linkedin, github, twitter, medium, portfolio, website) from the original personal/social sections must be in basics.
+5. SUMMARY — must be specific to the target roles above, not generic fluff and not tied to one company.
+6. DATE FORMATS — all sortDate must be YYYY-MM. endSortDate must be "9999-12" for current roles.
+7. SKILLS COMPLETENESS — all skill categories from the source must appear, reordered for the target roles.
+8. ROLE TITLE CONSISTENCY — keep each experience role title aligned with the original source portfolio naming. Do not embellish or normalize titles unless the source itself differs.
+
+Fix every issue you find. Return ONLY the corrected resume JSON. No explanation, no markdown.
+""",
+        expected_output="A complete, validated all-purpose resume JSON with all issues fixed.",
+        agent=agent,
+    )
+
+
+def build_general_cover_letter_task(
+    agent: Agent,
+    gen_content: dict,
+    target_roles: list[str],
+) -> Task:
+    personal = gen_content.get("personal", {})
+    roles_str = ", ".join(target_roles) if target_roles else personal.get("title", "software engineer")
+
+    return Task(
+        description=f"""
+Write a reusable, all-purpose cover letter for general job applications.
+This is NOT for a specific company. It should be broadly reusable for these target roles:
+{roles_str}
+
+## Candidate
+Name: {personal.get('name', '')}
+Title: {personal.get('title', '')}
+Bio: {personal.get('bio', '')}
+
+## Source Portfolio
+{json.dumps(gen_content, indent=2)[:4000]}
+
+## Writing Rules
+- Do NOT mention any company name, hiring manager, or specific job description
+- Do NOT open with "I am writing to apply" or "I am excited to apply"
+- 3-4 paragraphs: strong professional hook -> relevant background -> role fit/value -> direct CTA
+- Make it specific to the target roles, domain strengths, and real experience
+- Keep it natural and confident, not generic or AI-sounding
+- Make it reusable as a strong base letter the user can lightly customize later
+
+Output the cover letter as plain text only. No JSON. No headers.
+""",
+        expected_output=(
+            "A 3-4 paragraph general-purpose cover letter in plain text with no formatting."
+        ),
+        agent=agent,
+    )

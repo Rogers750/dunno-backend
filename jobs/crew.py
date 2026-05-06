@@ -353,6 +353,68 @@ def _run_project_advisor(gen_content: dict, job: dict) -> ProjectSuggestions:
         return ProjectSuggestions(suggestions=[])
 
 
+def _norm_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+
+def _build_source_role_lookup(gen_content: dict) -> tuple[dict, dict]:
+    """
+    Build lookups from source portfolio experience so generated resumes can keep
+    the user's original role naming instead of letting the LLM rephrase titles.
+    """
+    by_company_and_dates: dict[tuple[str, str, str], str] = {}
+    by_company: dict[str, list[str]] = {}
+
+    for exp in gen_content.get("experience", []) or []:
+        if not isinstance(exp, dict):
+            continue
+        company = _norm_text(exp.get("company", ""))
+        role = (exp.get("role") or "").strip()
+        if not company or not role:
+            continue
+
+        start = _norm_text(exp.get("startDate") or exp.get("sortDate") or "")
+        end = _norm_text(exp.get("endDate") or exp.get("endSortDate") or "")
+        if start or end:
+            by_company_and_dates[(company, start, end)] = role
+        by_company.setdefault(company, []).append(role)
+
+    return by_company_and_dates, by_company
+
+
+def _enforce_source_role_titles(resume_json: dict, gen_content: dict) -> dict:
+    """
+    Restore experience.role values from the source portfolio wherever possible.
+    This keeps naming monotonous and prevents the LLM from changing titles like
+    "Backend Engineer II" into arbitrary variants unless the source actually
+    contains a different role.
+    """
+    experience = resume_json.get("experience")
+    if not isinstance(experience, list):
+        return resume_json
+
+    by_company_and_dates, by_company = _build_source_role_lookup(gen_content)
+
+    for exp in experience:
+        if not isinstance(exp, dict):
+            continue
+
+        company = _norm_text(exp.get("company", ""))
+        start = _norm_text(exp.get("startDate") or exp.get("sortDate") or "")
+        end = _norm_text(exp.get("endDate") or exp.get("endSortDate") or "")
+
+        source_role = by_company_and_dates.get((company, start, end))
+        if source_role:
+            exp["role"] = source_role
+            continue
+
+        roles_for_company = by_company.get(company) or []
+        if len(set(roles_for_company)) == 1:
+            exp["role"] = roles_for_company[0]
+
+    return resume_json
+
+
 # ── Main orchestration ────────────────────────────────────────────────────────
 
 def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None:
@@ -534,6 +596,8 @@ def build_resume_for_match(user_id: str, match_id: str) -> dict:
         logger.warning("[build_resume] validator returned non-JSON, using builder output")
         validated_json = resume_json
 
+    validated_json = _enforce_source_role_titles(validated_json, gen_content)
+
     supabase_admin.table("user_matched_jobs").update({"resume_json": validated_json}).eq("id", match_id).execute()
     logger.info(f"[build_resume] saved resume match_id={match_id}")
     return validated_json
@@ -612,3 +676,96 @@ def build_projects_for_match(user_id: str, match_id: str) -> dict:
     supabase_admin.table("user_matched_jobs").update({"project_suggestions": suggestions.model_dump()}).eq("id", match_id).execute()
     logger.info(f"[build_projects] saved project suggestions match_id={match_id}")
     return suggestions.model_dump()
+
+
+def build_general_resume_and_cover(user_id: str) -> dict:
+    """
+    Build an all-purpose resume JSON and reusable cover letter from the user's
+    published portfolio. Unlike the matched-job flow, this is not tied to a
+    specific company or job description and returns the result directly.
+    """
+    from jobs.agents import build_resume_builder, build_resume_validator, build_cover_letter_writer
+    from jobs.tasks import (
+        build_general_resume_task,
+        build_general_resume_validation_task,
+        build_general_cover_letter_task,
+    )
+
+    ctx = _load_user_context(user_id)
+    if not ctx:
+        raise ValueError("No published portfolio or profile found")
+
+    gen_content = ctx["gen_content"]
+    target_roles = ctx["target_roles"] or []
+    portfolio_row = (
+        supabase_admin.table("portfolios")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("published", True)
+        .limit(1)
+        .execute()
+    )
+    if not portfolio_row.data:
+        raise ValueError("No published portfolio found")
+    portfolio_id = portfolio_row.data[0]["id"]
+
+    builder = build_resume_builder(deepseek_llm)
+    build_task = build_general_resume_task(builder, gen_content, target_roles)
+    build_result = Crew(
+        agents=[builder],
+        tasks=[build_task],
+        process=Process.sequential,
+        verbose=False,
+    ).kickoff()
+
+    raw = build_result.raw if hasattr(build_result, "raw") else str(build_result)
+    raw = re.sub(r"^```(?:json)?\n?", "", raw.strip())
+    raw = re.sub(r"\n?```$", "", raw.strip())
+    try:
+        resume_json = json.loads(raw)
+    except Exception:
+        logger.error("[build_general_resume_and_cover] builder returned non-JSON, raw=%s", raw[:300])
+        raise ValueError("Resume builder returned invalid JSON")
+
+    validator = build_resume_validator(deepseek_llm)
+    validate_task = build_general_resume_validation_task(
+        validator, gen_content, target_roles, resume_json
+    )
+    validate_result = Crew(
+        agents=[validator],
+        tasks=[validate_task],
+        process=Process.sequential,
+        verbose=False,
+    ).kickoff()
+
+    val_raw = validate_result.raw if hasattr(validate_result, "raw") else str(validate_result)
+    val_raw = re.sub(r"^```(?:json)?\n?", "", val_raw.strip())
+    val_raw = re.sub(r"\n?```$", "", val_raw.strip())
+    try:
+        validated_json = json.loads(val_raw)
+    except Exception:
+        logger.warning("[build_general_resume_and_cover] validator returned non-JSON, using builder output")
+        validated_json = resume_json
+
+    validated_json = _enforce_source_role_titles(validated_json, gen_content)
+
+    cover_agent = build_cover_letter_writer(deepseek_llm)
+    cover_task = build_general_cover_letter_task(cover_agent, gen_content, target_roles)
+    cover_result = Crew(
+        agents=[cover_agent],
+        tasks=[cover_task],
+        process=Process.sequential,
+        verbose=False,
+    ).kickoff()
+    cover_letter = cover_result.raw if hasattr(cover_result, "raw") else str(cover_result)
+
+    payload = {
+        "general_resume_json": validated_json,
+        "general_cover_letter": cover_letter,
+    }
+    supabase_admin.table("portfolios").update(payload).eq("id", portfolio_id).execute()
+
+    return {
+        "resume_json": validated_json,
+        "cover_letter": cover_letter,
+    }
