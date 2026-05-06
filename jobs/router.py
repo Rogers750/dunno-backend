@@ -424,8 +424,6 @@ async def update_preferences(
         current["company_types"] = payload.company_types
     if payload.min_experience is not None:
         current["min_experience"] = payload.min_experience
-    if payload.max_experience is not None:
-        current["max_experience"] = payload.max_experience
 
     result = supabase_admin.table("profiles").update({"job_preferences": current}).eq("id", user.id).execute()
     logger.info(f"[profile/preferences] user={user.id} prefs={current}")
