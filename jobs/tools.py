@@ -59,6 +59,11 @@ def _upsert_job(
     if existing.data:
         return existing.data[0]["id"]
 
+    # Parse min_experience from description — regex only, no LLM, runs in microseconds
+    from jobs.scoring import extract_required_years
+    min_exp, _ = extract_required_years(description or "")
+    min_experience = min_exp if min_exp > 0 else None
+
     try:
         result = supabase_admin.table("job_listings").insert({
             "job_hash": job_hash,
@@ -72,6 +77,7 @@ def _upsert_job(
             "posted_at": posted_at,
             "expires_at": expires_at,
             "is_live": True,
+            "min_experience": min_experience,
         }).execute()
         return result.data[0]["id"] if result.data else None
     except Exception as e:

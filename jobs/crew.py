@@ -111,32 +111,42 @@ def _get_relevant_unmatched_from_db(
     target_roles: list[str],
     matched_ids: set,
     preferences: dict,
+    candidate_years: float,
     min_count: int = 15,
     days: int = 7,
 ) -> list[str]:
     """
     Check job_listings for recent, role-relevant, unmatched jobs.
-    Applies user preferences (location, company_type) as filters.
+    Filters by: title keywords, location preference, min_experience vs candidate years.
     Returns IDs if >= min_count found, else empty list (triggers fresh scrape).
     """
     from datetime import datetime, timezone, timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # Allow 1.5yr buffer — so 3.5yr candidate can see jobs requiring up to 5yr
+    exp_ceiling = candidate_years + 1.5
 
     recent = (
         supabase_admin.table("job_listings")
         .select("id, title, location")
         .eq("is_live", True)
         .gte("created_at", cutoff)
+        .or_(f"min_experience.is.null,min_experience.lte.{exp_ceiling}")
         .execute()
     )
 
+    # Build role keywords — only expand multi-word roles if result is >= 2 words
+    _GENERIC = {"engineer", "developer", "manager", "analyst", "lead", "architect", "consultant"}
     role_keywords = [r.lower().strip() for r in target_roles if r]
     expanded = set()
     for role in role_keywords:
         expanded.add(role)
         parts = role.split()
         if len(parts) > 1:
-            expanded.add(" ".join(parts[1:]))
+            tail = " ".join(parts[1:])
+            # Only add if the tail is not a single generic word
+            if len(tail.split()) > 1 or tail not in _GENERIC:
+                expanded.add(tail)
 
     preferred_locations = [l.lower() for l in (preferences.get("preferred_locations") or [])]
 
@@ -147,7 +157,6 @@ def _get_relevant_unmatched_from_db(
         title_lower = (row.get("title") or "").lower()
         if not any(kw in title_lower for kw in expanded):
             continue
-        # Location filter — only apply if user set preferences
         if preferred_locations:
             loc = (row.get("location") or "").lower()
             remote_ok = "remote" in preferred_locations
@@ -157,7 +166,7 @@ def _get_relevant_unmatched_from_db(
 
     logger.info(
         f"[crew] DB pool check: {len(candidates)} relevant unmatched jobs "
-        f"(need {min_count} to skip scrape)"
+        f"(candidate_years={candidate_years}, exp_ceiling={exp_ceiling}, need {min_count} to skip scrape)"
     )
     return candidates if len(candidates) >= min_count else []
 
@@ -298,7 +307,9 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
 
         # Try DB first — skip Apify if enough relevant recent jobs already exist
         preferences = ctx["preferences"]
-        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences)
+        from jobs.scoring import extract_candidate_years
+        candidate_years = extract_candidate_years(gen_content)
+        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences, candidate_years)
         if db_ids:
             new_ids = db_ids
             logger.info(f"[jobs_crew] skipping Apify — using {len(new_ids)} jobs from DB")
@@ -343,9 +354,6 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         # Apply preference-based filtering before ranking
         preferred_locations = [l.lower() for l in (preferences.get("preferred_locations") or [])]
         preferred_types = [t.lower() for t in (preferences.get("company_types") or [])]
-        min_exp = preferences.get("min_experience")
-        max_exp = preferences.get("max_experience")
-
         def _preference_score(job_id: str, job: dict, match: MatchResult) -> float:
             score = match.match_score
             breakdown = match.score_breakdown
@@ -361,11 +369,6 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
             # Company type — if preferences set, boost weight of company_type dimension
             if preferred_types and breakdown.company_type is not None:
                 score = score * 0.85 + breakdown.company_type * 0.15
-
-            # Experience range — penalise if experience score is very low and range is set
-            if (min_exp is not None or max_exp is not None) and breakdown.experience is not None:
-                if breakdown.experience < 4.0:
-                    score -= 0.5
 
             return score
 
