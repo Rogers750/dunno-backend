@@ -177,6 +177,70 @@ class LinkedInJobsTool(BaseTool):
 
 
 
+# ── Shared pool scraper — called by cron, not by agents ──────────────────────
+
+SCRAPE_ROLES = [
+    "Data Engineer",
+    "Software Engineer",
+    "Backend Engineer",
+    "Frontend Engineer",
+    "Data Analyst",
+    "Data Scientist",
+    "Machine Learning Engineer",
+]
+
+
+def scrape_shared_pool() -> dict:
+    """
+    Scrape LinkedIn for each fixed role category and store in the shared job pool.
+    Called once per cron cycle — all users then match against this pool.
+    Returns a summary dict: {role: jobs_saved}.
+    """
+    client = _apify_client()
+    summary = {}
+
+    for role in SCRAPE_ROLES:
+        try:
+            encoded = role.replace(" ", "%20")
+            # last 48h, full-time only, sorted by most recent
+            search_url = (
+                f"https://www.linkedin.com/jobs/search/"
+                f"?keywords={encoded}"
+                f"&location=India"
+                f"&f_TPR=r172800"   # last 48 hours
+                f"&f_JT=F"          # full-time only
+                f"&sortBy=DD"       # most recent first
+            )
+            run = client.actor(_LINKEDIN_ACTOR).call(
+                run_input={"urls": [search_url]},
+                timeout_secs=180,
+            )
+            items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+            saved = 0
+            for item in items:
+                jid = _upsert_job(
+                    title=_pick(item, ["title", "jobTitle", "position"]),
+                    company=_pick(item, ["companyName", "company", "employer"]),
+                    url=_pick(item, ["link", "applyUrl", "jobUrl", "url", "jobLink"]),
+                    platform="linkedin",
+                    location=_pick(item, ["location", "jobLocation"]),
+                    description=_pick(item, ["descriptionText", "description", "descriptionHtml"]),
+                    salary_range=_pick(item, ["salaryInfo", "salary", "salaryRange", "compensation"]),
+                    posted_at=_pick(item, ["postedAt", "postedDate", "datePosted"]),
+                )
+                if jid:
+                    saved += 1
+            summary[role] = saved
+            logger.info(f"[shared_pool] '{role}' → {len(items)} scraped, {saved} saved/deduped")
+        except Exception as e:
+            logger.error(f"[shared_pool] failed for role='{role}': {e}")
+            summary[role] = 0
+
+    total = sum(summary.values())
+    logger.info(f"[shared_pool] done — {total} total jobs across {len(SCRAPE_ROLES)} roles")
+    return summary
+
+
 # ── Google Jobs Tool (replaces Wellfound + Instahyre) ────────────────────────
 
 class GoogleJobsTool(BaseTool):
