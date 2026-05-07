@@ -56,7 +56,11 @@ def _pick(item: dict, keys: list[str]) -> Optional[str]:
 
 
 def _compute_job_hash(company: str, title: str, url: str) -> str:
-    raw = company.lower() + title.lower() + url
+    # Strip URL query params — same job can have different tracking params across scrapes
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    clean_url = parsed.scheme + "://" + parsed.netloc + parsed.path
+    raw = company.lower().strip() + "|" + title.lower().strip() + "|" + clean_url
     return hashlib.md5(raw.encode()).hexdigest()
 
 
