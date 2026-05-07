@@ -261,7 +261,7 @@ async def get_resume(
     match_id: str,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    """Return the tailored resume JSON for a matched job."""
+    """Return the tailored resume JSON for a matched job. resume_json is null if not built yet."""
     user = _get_user(credentials)
 
     row = (
@@ -274,7 +274,11 @@ async def get_resume(
     if not row.data:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    return {"resume_json": row.data[0].get("resume_json") or {}}
+    resume_json = row.data[0].get("resume_json")
+    return {
+        "resume_json": resume_json,
+        "status": "done" if resume_json else "pending",
+    }
 
 
 
@@ -298,7 +302,11 @@ async def get_cover_letter(
     if not row.data:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    return {"cover_letter": row.data[0].get("cover_letter") or ""}
+    cover_letter = row.data[0].get("cover_letter")
+    return {
+        "cover_letter": cover_letter,
+        "status": "done" if cover_letter else "pending",
+    }
 
 
 # ── GET /jobs/:id/projects ────────────────────────────────────────────────────
