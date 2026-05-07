@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import random
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -114,39 +115,20 @@ def _fetch_job(job_id: str) -> Optional[dict]:
     return result.data[0] if result.data else None
 
 
-def _build_profile_text(gen_content: dict, target_roles: list[str]) -> str:
-    """Build a text representation of the candidate profile for embedding."""
-    skills_data = gen_content.get("skills", {})
-    all_skills = []
-    if isinstance(skills_data, dict):
-        for cat in ["languages", "frameworks", "tools", "concepts"]:
-            all_skills.extend(skills_data.get(cat, []))
-
-    experience = gen_content.get("experience", [])
-    exp_titles = [f"{e.get('role', '')} at {e.get('company', '')}" for e in experience[:5]]
-
-    personal = gen_content.get("personal", {})
-    bio = personal.get("bio") or personal.get("summary") or ""
-
-    return (
-        f"Target roles: {', '.join(target_roles)}\n"
-        f"Skills: {', '.join(all_skills[:30])}\n"
-        f"Experience: {', '.join(exp_titles)}\n"
-        f"Bio: {bio[:500]}"
-    )
 
 
-def _generate_profile_embedding(gen_content: dict, target_roles: list[str]) -> Optional[list]:
-    """Generate embedding for the user's profile. Used for vector similarity search."""
-    try:
-        from jobs.tools import _get_voyage_client
-        text = _build_profile_text(gen_content, target_roles)
-        client = _get_voyage_client()
-        result = client.embed([text], model="voyage-3")
-        return result.embeddings[0]
-    except Exception as e:
-        logger.warning(f"[crew] profile embedding failed: {e}")
-        return None
+def _extract_role_keywords(target_roles: list[str]) -> list[str]:
+    """Extract searchable keywords from target roles. e.g. 'Senior Data Engineer' → ['data engineer', 'senior data engineer']"""
+    _GENERIC = {"senior", "junior", "lead", "staff", "principal", "associate", "mid", "entry"}
+    keywords = set()
+    for role in target_roles:
+        role_lower = role.lower().strip()
+        keywords.add(role_lower)
+        # also add without seniority prefix
+        parts = role_lower.split()
+        if parts[0] in _GENERIC and len(parts) > 1:
+            keywords.add(" ".join(parts[1:]))
+    return list(keywords)
 
 
 def _get_relevant_unmatched_from_db(
@@ -155,86 +137,66 @@ def _get_relevant_unmatched_from_db(
     preferences: dict,
     candidate_years: float,
     gen_content: dict,
-    min_count: int = 15,
 ) -> list[str]:
     """
-    Find relevant unmatched jobs using vector similarity search.
-    Falls back to keyword filter if embeddings aren't available.
-    Returns IDs if >= min_count found, else empty list (triggers fresh scrape).
+    Regex search on title + location, then random sample 1-15.
+    No vector search — simple, fast, reliable.
     """
     preferred_locs = preferences.get("preferred_locations") or []
-    exclude_ids = list(matched_ids)
-
-    # Use preference experience range if set, else fall back to candidate years + buffer
     pref_min = preferences.get("min_experience")
     pref_max = preferences.get("max_experience")
     exp_floor = float(pref_min) if pref_min is not None else 0.0
     exp_ceiling = float(pref_max) if pref_max is not None else (candidate_years + 1.5)
 
-    # ── Vector search (primary path) ─────────────────────────────────────────
-    profile_embedding = _generate_profile_embedding(gen_content, target_roles)
-    if profile_embedding:
-        try:
-            result = supabase_admin.rpc("match_jobs", {
-                "query_embedding": profile_embedding,
-                "exclude_ids": exclude_ids,
-                "exp_floor": exp_floor,
-                "exp_ceiling": exp_ceiling,
-                "preferred_locs": preferred_locs,
-                "match_count": 50,
-            }).execute()
-
-            candidates = [row["id"] for row in (result.data or [])]
-            logger.info(
-                f"[crew] vector search: {len(candidates)} candidates "
-                f"(exp_floor={exp_floor}, exp_ceiling={exp_ceiling})"
-            )
-            return candidates if len(candidates) >= min_count else []
-        except Exception as e:
-            logger.warning(f"[crew] vector search failed, falling back to keyword: {e}")
-
-    # ── Keyword fallback (for jobs with no embedding yet) ────────────────────
-    from datetime import datetime, timezone, timedelta
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-
-    exp_filter = f"min_experience.is.null,and(min_experience.gte.{exp_floor},min_experience.lte.{exp_ceiling})"
-    recent = (
+    # ── Fetch all live unmatched jobs ─────────────────────────────────────────
+    query = (
         supabase_admin.table("job_listings")
-        .select("id, title, location")
+        .select("id, title, location, min_experience")
         .eq("is_live", True)
-        .gte("created_at", cutoff)
-        .or_(exp_filter)
-        .execute()
+        .not_.in_("id", list(matched_ids) or ["00000000-0000-0000-0000-000000000000"])
+    )
+    rows = query.execute().data or []
+
+    # ── Filter by title (target roles) ───────────────────────────────────────
+    role_keywords = _extract_role_keywords(target_roles)
+    title_matched = [
+        r for r in rows
+        if any(kw in (r.get("title") or "").lower() for kw in role_keywords)
+    ]
+
+    # ── Filter by location ────────────────────────────────────────────────────
+    if preferred_locs:
+        locs_lower = [l.lower() for l in preferred_locs]
+        remote_ok = any("remote" in l for l in locs_lower)
+        location_matched = [
+            r for r in title_matched
+            if any(l in (r.get("location") or "").lower() for l in locs_lower)
+            or (remote_ok and "remote" in (r.get("location") or "").lower())
+        ]
+    else:
+        location_matched = title_matched
+
+    # ── Filter by experience range ────────────────────────────────────────────
+    exp_matched = [
+        r for r in location_matched
+        if r.get("min_experience") is None
+        or (exp_floor <= r["min_experience"] <= exp_ceiling)
+    ]
+
+    logger.info(
+        f"[crew] regex filter: title={len(title_matched)} → location={len(location_matched)} "
+        f"→ exp={len(exp_matched)} (floor={exp_floor}, ceil={exp_ceiling})"
     )
 
-    _GENERIC = {"engineer", "developer", "manager", "analyst", "lead", "architect", "consultant"}
-    role_keywords = [r.lower().strip() for r in target_roles if r]
-    expanded = set()
-    for role in role_keywords:
-        expanded.add(role)
-        parts = role.split()
-        if len(parts) > 1:
-            tail = " ".join(parts[1:])
-            if len(tail.split()) > 1 or tail not in _GENERIC:
-                expanded.add(tail)
+    if not exp_matched:
+        return []
 
-    preferred_locations = [l.lower() for l in preferred_locs]
-    candidates = []
-    for row in (recent.data or []):
-        if row["id"] in matched_ids:
-            continue
-        title_lower = (row.get("title") or "").lower()
-        if not any(kw in title_lower for kw in expanded):
-            continue
-        if preferred_locations:
-            loc = (row.get("location") or "").lower()
-            remote_ok = "remote" in preferred_locations
-            if not any(pl in loc for pl in preferred_locations) and not (remote_ok and "remote" in loc):
-                continue
-        candidates.append(row["id"])
-
-    logger.info(f"[crew] keyword fallback: {len(candidates)} candidates")
-    return candidates if len(candidates) >= min_count else []
+    # ── Random sample 1-15 ────────────────────────────────────────────────────
+    sample_size = min(15, len(exp_matched))
+    sampled = random.sample(exp_matched, sample_size)
+    ids = [r["id"] for r in sampled]
+    logger.info(f"[crew] sampled {len(ids)} jobs for scoring")
+    return ids
 
 
 def _save_match(user_id: str, job_id: str, match_result: MatchResult) -> None:
@@ -525,6 +487,7 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         from jobs.scoring import extract_candidate_years
         candidate_years = extract_candidate_years(gen_content)
         new_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences, candidate_years, gen_content)
+
         if not new_ids:
             logger.info(f"[jobs_crew] no unmatched jobs in pool for user={user_id}")
             _finish_run(run_id)
@@ -557,7 +520,7 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         scored.sort(key=lambda x: x[2].match_score, reverse=True)
 
         # Drop anything below 6.0 — not worth showing to the user
-        MIN_SCORE = 6.0
+        MIN_SCORE = 5.0
         qualified = [(jid, job, mr) for jid, job, mr in scored if mr.match_score >= MIN_SCORE]
         top_jobs = qualified[:limit]
 
