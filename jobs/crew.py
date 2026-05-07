@@ -288,7 +288,10 @@ def _run_matcher(gen_content: dict, ctc: dict, job: dict, preferences: dict | No
         match = result.pydantic
     else:
         try:
-            match = MatchResult(**json.loads(result.raw))
+            raw = result.raw if hasattr(result, "raw") else str(result)
+            raw = re.sub(r"^```(?:json)?\n?", "", raw.strip())
+            raw = re.sub(r"\n?```$", "", raw.strip())
+            match = MatchResult(**json.loads(raw))
         except Exception:
             match = MatchResult(
                 match_score=5.0,
@@ -510,22 +513,15 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         existing = supabase_admin.table("user_matched_jobs").select("job_id").eq("user_id", user_id).execute()
         matched_ids = {r["job_id"] for r in (existing.data or [])}
 
-        # Try DB first — skip Apify if enough relevant recent jobs already exist
+        # Always use DB pool — scraping only happens via cron (scrape_shared_pool)
         preferences = ctx["preferences"]
         from jobs.scoring import extract_candidate_years
         candidate_years = extract_candidate_years(gen_content)
-        db_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences, candidate_years, gen_content)
-        if db_ids:
-            new_ids = db_ids
-            logger.info(f"[jobs_crew] skipping Apify — using {len(new_ids)} jobs from DB")
-            progress["current_agent"] = "Agent 1 — Using cached jobs"
-        else:
-            logger.info(f"[jobs_crew] DB pool insufficient — running Apify scrapers")
-            job_ids = _run_job_search(target_roles, gen_content)
-            if not job_ids:
-                _fail_run(run_id, "No jobs found across all platforms")
-                return
-            new_ids = [jid for jid in job_ids if jid not in matched_ids]
+        new_ids = _get_relevant_unmatched_from_db(target_roles, matched_ids, preferences, candidate_years, gen_content)
+        if not new_ids:
+            logger.info(f"[jobs_crew] no unmatched jobs in pool for user={user_id}")
+            _finish_run(run_id)
+            return
 
         progress["completed_agents"].append("Agent 1 — Job Searcher")
         progress["jobs_found"] = len(new_ids)

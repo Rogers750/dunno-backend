@@ -165,7 +165,6 @@ Return ONLY a JSON object:
 """,
         expected_output="A JSON object with match_score and score_breakdown.",
         agent=agent,
-        output_pydantic=MatchResult,
     )
 
 
@@ -195,7 +194,6 @@ Return ONLY a JSON object matching this schema:
 """,
         expected_output="A JSON object with Glassdoor company data, all fields nullable.",
         agent=agent,
-        output_pydantic=CompanyInfo,
     )
 
 
@@ -428,7 +426,6 @@ Return ONLY a JSON object:
 """,
         expected_output="A JSON object with exactly 3 project suggestions.",
         agent=agent,
-        output_pydantic=ProjectSuggestions,
     )
 
 
