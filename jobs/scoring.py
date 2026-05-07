@@ -22,8 +22,46 @@ def _parse_date(s: str) -> datetime | None:
 
 # ── Candidate experience ──────────────────────────────────────────────────────
 
+def _parse_duration_string(duration: str) -> float:
+    """
+    Parse a plain duration string into years.
+    Handles: "3.5 years", "2 years 3 months", "1 yr 6 mo", "18 months", "Jan 2021 - Present"
+    """
+    if not duration:
+        return 0.0
+    d = duration.strip()
+
+    # Date range: "Jan 2021 - Present" or "2020 - 2023"
+    range_match = re.search(r'(.+?)\s*[-–]\s*(.+)', d)
+    if range_match:
+        start = _parse_date(range_match.group(1).strip())
+        end_str = range_match.group(2).strip()
+        now = datetime.now()
+        is_current = end_str.lower() in ("present", "current", "now", "")
+        end = now if is_current else _parse_date(end_str)
+        if start and end:
+            months = (end.year - start.year) * 12 + (end.month - start.month)
+            return round(max(0, months) / 12, 1)
+
+    # Plain duration: "2 years 3 months", "18 months", "3.5 years"
+    years = 0.0
+    m = re.search(r'(\d+\.?\d*)\s*(?:years?|yrs?)', d, re.IGNORECASE)
+    if m:
+        years += float(m.group(1))
+    m = re.search(r'(\d+)\s*(?:months?|mos?)', d, re.IGNORECASE)
+    if m:
+        years += float(m.group(1)) / 12
+    return round(years, 1)
+
+
 def extract_candidate_years(gen_content: dict) -> float:
-    """Sum experience durations from gen_content dates. Returns total years as float."""
+    """Sum experience durations from gen_content. Returns total years as float."""
+    # Fast path — pre-computed field
+    total = gen_content.get("total_years_experience")
+    if total and float(total) > 0:
+        logger.info(f"[scoring] candidate_years={total} from total_years_experience field")
+        return float(total)
+
     experience = gen_content.get("experience", [])
     if not experience:
         return 0.0
@@ -38,12 +76,24 @@ def extract_candidate_years(gen_content: dict) -> float:
         start_str = role.get("startDate") or role.get("sortDate") or ""
         end_str = role.get("endDate") or role.get("endSortDate") or ""
 
+        # If no start/end dates, try parsing the duration field directly
+        if not start_str:
+            duration_str = role.get("duration") or ""
+            if duration_str:
+                years = _parse_duration_string(duration_str)
+                total_months += int(years * 12)
+            continue
+
         is_current = end_str in ("Present", "present", "9999-12", "", "Current", "current")
-        logger.debug(f"[scoring] role date strings: start={start_str!r} end={end_str!r} is_current={is_current}")
         start = _parse_date(start_str)
         end = now if is_current else _parse_date(end_str)
 
         if not start or not end:
+            # Last resort: try duration field
+            duration_str = role.get("duration") or ""
+            if duration_str:
+                years = _parse_duration_string(duration_str)
+                total_months += int(years * 12)
             continue
 
         months = (end.year - start.year) * 12 + (end.month - start.month)

@@ -162,9 +162,14 @@ def _get_relevant_unmatched_from_db(
     Falls back to keyword filter if embeddings aren't available.
     Returns IDs if >= min_count found, else empty list (triggers fresh scrape).
     """
-    exp_ceiling = candidate_years + 1.5
     preferred_locs = preferences.get("preferred_locations") or []
     exclude_ids = list(matched_ids)
+
+    # Use preference experience range if set, else fall back to candidate years + buffer
+    pref_min = preferences.get("min_experience")
+    pref_max = preferences.get("max_experience")
+    exp_floor = float(pref_min) if pref_min is not None else 0.0
+    exp_ceiling = float(pref_max) if pref_max is not None else (candidate_years + 1.5)
 
     # ── Vector search (primary path) ─────────────────────────────────────────
     profile_embedding = _generate_profile_embedding(gen_content, target_roles)
@@ -173,6 +178,7 @@ def _get_relevant_unmatched_from_db(
             result = supabase_admin.rpc("match_jobs", {
                 "query_embedding": profile_embedding,
                 "exclude_ids": exclude_ids,
+                "exp_floor": exp_floor,
                 "exp_ceiling": exp_ceiling,
                 "preferred_locs": preferred_locs,
                 "match_count": 50,
@@ -181,7 +187,7 @@ def _get_relevant_unmatched_from_db(
             candidates = [row["id"] for row in (result.data or [])]
             logger.info(
                 f"[crew] vector search: {len(candidates)} candidates "
-                f"(candidate_years={candidate_years}, exp_ceiling={exp_ceiling})"
+                f"(exp_floor={exp_floor}, exp_ceiling={exp_ceiling})"
             )
             return candidates if len(candidates) >= min_count else []
         except Exception as e:
@@ -191,12 +197,13 @@ def _get_relevant_unmatched_from_db(
     from datetime import datetime, timezone, timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
+    exp_filter = f"min_experience.is.null,and(min_experience.gte.{exp_floor},min_experience.lte.{exp_ceiling})"
     recent = (
         supabase_admin.table("job_listings")
         .select("id, title, location")
         .eq("is_live", True)
         .gte("created_at", cutoff)
-        .or_(f"min_experience.is.null,min_experience.lte.{exp_ceiling}")
+        .or_(exp_filter)
         .execute()
     )
 
@@ -527,17 +534,11 @@ def run_jobs_crew(user_id: str, limit: int = 7, trigger: str = "manual") -> None
         progress["jobs_found"] = len(new_ids)
         _update_progress(run_id, progress)
 
-        if not new_ids:
-            _finish_run(run_id)
-            logger.info(f"[jobs_crew] no new jobs to process for user={user_id}")
-            return
-
         # ── Pass 1: Agent 2 scores ALL new jobs ──────────────────────────────
         # Score every new job first, then pick top `limit` by match_score.
         # This ensures we only build resumes/cover letters for the best matches.
         progress["current_step"] = 2
         progress["current_agent"] = f"Agent 2 — Scoring {len(new_ids)} jobs"
-        progress["completed_agents"].append("Agent 1 — Job Searcher")
         _update_progress(run_id, progress)
 
         scored = []
