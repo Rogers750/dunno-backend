@@ -118,7 +118,7 @@ async def list_jobs(credentials: HTTPAuthorizationCredentials = Depends(security
         supabase_admin.table("user_matched_jobs")
         .select("id, job_id, match_score, score_breakdown, company_info, status")
         .eq("user_id", user.id)
-        .neq("status", "applied")
+        .not_.in_("status", ["applied", "rejected"])
         .order("match_score", desc=True)
         .limit(10)
         .execute()
@@ -224,6 +224,34 @@ async def apply_job(
         .execute()
     )
     return updated.data[0] if updated.data else {"id": match_id, "status": "applied"}
+
+
+# ── PATCH /jobs/:id/reject ────────────────────────────────────────────────────
+
+@jobs_router.patch("/{match_id}/reject")
+async def reject_job(
+    match_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Mark a matched job as rejected. It will be excluded from the user's job list."""
+    user = _get_user(credentials)
+    row = (
+        supabase_admin.table("user_matched_jobs")
+        .select("id")
+        .eq("id", match_id)
+        .eq("user_id", user.id)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    updated = (
+        supabase_admin.table("user_matched_jobs")
+        .update({"status": "rejected"})
+        .eq("id", match_id)
+        .execute()
+    )
+    return updated.data[0] if updated.data else {"id": match_id, "status": "rejected"}
 
 
 # ── GET /jobs/:id/resume ──────────────────────────────────────────────────────
