@@ -328,9 +328,12 @@ async def get_project_suggestions(
     if not row.data:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    raw = row.data[0].get("project_suggestions") or {}
+    raw = row.data[0].get("project_suggestions")
     suggestions = raw.get("suggestions", []) if isinstance(raw, dict) else []
-    return {"project_suggestions": suggestions}
+    return {
+        "project_suggestions": suggestions,
+        "status": "done" if raw else "pending",
+    }
 
 
 # ── GET /jobs/:id/company ─────────────────────────────────────────────────────
@@ -352,7 +355,11 @@ async def get_company_info(
     if not row.data:
         raise HTTPException(status_code=404, detail="Match not found")
 
-    return {"company_info": row.data[0].get("company_info") or {}}
+    company_info = row.data[0].get("company_info")
+    return {
+        "company_info": company_info,
+        "status": "done" if company_info else "pending",
+    }
 
 
 # ── POST /jobs/:id/resume ─────────────────────────────────────────────────────
