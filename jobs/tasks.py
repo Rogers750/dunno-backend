@@ -374,10 +374,14 @@ Culture: {company_info.get('culture_notes', 'N/A')}
 - Do NOT open with "I am writing to apply" or "I am excited to apply"
 - Open with a specific hook — reference something concrete about the company or role
 - 3-4 paragraphs: hook → relevant background → why this company specifically → CTA
-- Use first person, confident tone, natural language
+- Use first person, casual and direct tone — write like a smart person typing an email, not like a polished speech
 - Reference culture_notes or company description to show genuine interest
-- End with a clear, direct call to action
-- Must not read as AI-generated — avoid buzzwords, passive voice, hollow phrases
+- End with a clear, direct call to action — keep it short and low-key, not dramatic
+- Introduce 2-3 small human imperfections: a sentence that runs a bit long, a comma used where a period would be more correct, or a minor word repeat (e.g. "I think I think" crossed out — no, just slight informality, not errors that confuse meaning)
+- Vary sentence length: mix short punchy sentences with longer ones — real humans don't write in perfect rhythm
+- Do NOT use inspirational or visionary language ("change the world", "passionate about", "transformative", "innovative", "revolutionize", "making an impact at scale") — none of that
+- Do NOT over-punctuate. Em dashes, semicolons, and perfectly balanced parallel structures make it sound AI-written. Use plain commas and full stops instead
+- The tone should feel like a confident engineer wrote this in 20 minutes, not a copywriter who spent 2 hours on it
 
 Output the cover letter as plain text only. No JSON. No headers.
 """,
@@ -669,9 +673,14 @@ Bio: {personal.get('bio', '')}
 ## Writing Rules
 - Do NOT mention any company name, hiring manager, or specific job description
 - Do NOT open with "I am writing to apply" or "I am excited to apply"
-- 3-4 paragraphs: strong professional hook -> relevant background -> role fit/value -> direct CTA
+- 3-4 paragraphs: strong professional hook → relevant background → role fit/value → direct CTA
 - Make it specific to the target roles, domain strengths, and real experience
-- Keep it natural and confident, not generic or AI-sounding
+- Write like a smart engineer typing a quick email — direct, slightly informal, confident
+- Vary sentence length. Mix short punchy ones with longer ones. Real writing has rhythm shifts
+- Introduce 2-3 small human imperfections: a sentence that runs a bit long, a faint repetition of a word, or a comma where a purist would use a semicolon. Nothing that hurts clarity — just enough to feel unpolished
+- Do NOT use inspirational or visionary language ("passionate about", "transformative", "change the world", "make an impact", "innovative", "revolutionize") — avoid all of it
+- Do NOT over-punctuate. No em dashes mid-sentence, no perfectly balanced parallel structures, no semicolons where a plain "and" or a new sentence would do
+- Tone: a confident engineer who wrote this quickly and meant it — not a copywriter, not a speechwriter, not Steve Jobs
 - Make it reusable as a strong base letter the user can lightly customize later
 
 Output the cover letter as plain text only. No JSON. No headers.
