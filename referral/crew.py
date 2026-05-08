@@ -63,7 +63,13 @@ def _determine_seniority(
 
 def _build_lang_instruction(seniority: str) -> str:
     """Always English — clean, direct, human. No Hindi, no Hinglish."""
-    return "Write in English only. No Hindi words, no Hinglish. Keep it natural and human, not corporate."
+    return (
+        "Write in English only. No Hindi words, no Hinglish. Keep it natural and human, not corporate. "
+        "Do NOT use em dashes (-- or —) anywhere in the message. "
+        "Do NOT use semicolons. Do NOT use ellipsis (...). "
+        "Use plain commas and full stops only. Short sentences are fine. "
+        "Punctuation should be minimal and natural, not stylised."
+    )
 
 
 def generate_referral_message(
@@ -254,7 +260,7 @@ def generate_referral_message(
             "OR 'toh' instead of 'so' OR a slight run-on. One only, never on a name.\n\n"
             f"{banned_phrases}\n\n"
             "GOOD EXAMPLE:\n"
-            "'Rishabh, randomly saw your profile — didnt realise you went to NIT Kurukshetra too. "
+            "'Rishabh, randomly saw your profile and didnt realise you went to NIT Kurukshetra too. "
             "Im applying for a data engineering role at JPMC, exactly the kind of work "
             "you're doing there. Sending my resume now, can you pass it along or refer me?'\n\n"
             "Output the message ONLY. "
