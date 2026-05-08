@@ -1,7 +1,6 @@
 import os
 import re
 import json
-import random
 import logging
 from crewai import LLM, Crew, Agent, Task, Process
 
@@ -63,17 +62,8 @@ def _determine_seniority(
 
 
 def _build_lang_instruction(seniority: str) -> str:
-    """Inject language mode deterministically from Python — not the LLM's job."""
-    if seniority == "senior":
-        return random.choice([
-            "Write in clean professional English only. Zero Hindi words.",
-            "Write in light Hinglish. Use aap/aapka/aapko for any Hindi pronouns. Never use tum.",
-        ])
-    else:
-        return (
-            "Write in natural Hinglish. Mix English and Hindi where it flows naturally. "
-            "Use tum/tumhara/tumko for Hindi pronouns. Never use aap."
-        )
+    """Always English — clean, direct, human. No Hindi, no Hinglish."""
+    return "Write in English only. No Hindi words, no Hinglish. Keep it natural and human, not corporate."
 
 
 def generate_referral_message(
@@ -263,10 +253,10 @@ def generate_referral_message(
             "  - Exactly ONE natural imperfection: missing apostrophe (dont/Im/its) "
             "OR 'toh' instead of 'so' OR a slight run-on. One only, never on a name.\n\n"
             f"{banned_phrases}\n\n"
-            "GOOD EXAMPLE (peer, Hinglish):\n"
-            f"'Rishabh, randomly dekha tumhara profile — NIT Kurukshetra batch ho tum bhi. "
+            "GOOD EXAMPLE:\n"
+            "'Rishabh, randomly saw your profile — didnt realise you went to NIT Kurukshetra too. "
             "Im applying for a data engineering role at JPMC, exactly the kind of work "
-            "you're doing there. Resume bhej raha hoon, ek baar team ko forward kar dena.'\n\n"
+            "you're doing there. Sending my resume now, can you pass it along or refer me?'\n\n"
             "Output the message ONLY. "
             "No intro sentence, no explanation, no quotes around it. "
             f"First word must be '{recipient_first_name},'."
