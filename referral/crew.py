@@ -79,24 +79,46 @@ If the person's current company clearly does NOT match "{company}", set warning 
 "<recipient_name>'s profile doesn't seem to show them currently working at {company}. You may have pasted the wrong profile."
 Otherwise set warning to null.
 
-## Step 4 — Write the referral DM
-Rules:
-- Address them by first name only
-- If shared connections exist, lead with that — it's the strongest hook
-- If no shared connections, open with something specific you noticed about their background
-- Be direct: say you're applying for "{role}" at {company} and would appreciate a referral or internal intro
-- Keep it short — 3-4 short paragraphs, this is a LinkedIn DM not an email
-- Sound like a real person, not a template — no "I hope this message finds you well", no "I am reaching out to", no "I came across your profile"
-- Slight informality is fine. Confident but not pushy
-- End with a low-pressure ask: "happy to share my resume if helpful" or "no worries if it's not possible"
-- No buzzwords, no "passionate about", no "excited to", no Steve Jobs language
-- Plain text only — no subject line, no Dear/Hi header, just the message body
+## Step 4 — Estimate seniority gap
+From the raw profile text, estimate the recipient's total years of professional experience.
+The sender ({user_name}) has approximately {len(user_exp)} roles worth of experience.
+
+Classify the seniority gap:
+- "senior" → recipient has 5+ more years of experience than the sender, OR holds a Director/VP/Principal/Fellow title
+- "peer" → within ~3 years of the sender's experience, or similar level
+- "junior" → recipient has less experience than the sender
+
+## Step 5 — Write the referral DM
+You are writing this as {user_name}, a real Indian engineer messaging another Indian engineer on LinkedIn.
+
+**Tone based on seniority gap:**
+
+If "senior" — English only. Respectful but direct. No slang. Still human and warm, not robotic.
+If "peer" or "junior" — Mix English and Hindi casually (Hinglish). Natural, like how Indian engineers actually text each other. No slang words like "yaar" or "bhai" — keep it professional even in Hinglish. Good Hinglish examples: "dekha tumhara profile", "actually apply kar raha hoon", "ek baar forward kar dena", "resume bhej sakta hoon". Bad examples: "bhai kya scene hai yaar ekdum".
+
+**The ask — always direct, never weak:**
+- Do NOT say "if possible", "no pressure", "no worries if not", "totally understand if you can't" — these kill momentum
+- The ask should assume they will help, not ask permission: "ek baar forward kar dena", "can you refer me or pass this along", "would really help if you could put in a word"
+- Make it easy for them to say yes — offer to send resume immediately
+
+**All tones — hard rules:**
+- Address by first name only, no "Hi" or "Dear" opener
+- Start with the shared connection if one exists — jump straight into it, no warm-up
+- If no shared connection, open with something specific and genuine about their work
+- Mention the job by short name only — never paste the full job title
+- Make 1 small natural typo — a missing apostrophe ("dont", "Im", "its"), or a lowercase start — one is enough
+- Vary sentence length. Short punchy ones mixed with longer ones. Not uniform rhythm.
+- Flow like thoughts, not paragraphs
+- Under 100 words total
+- NEVER use: "I am reaching out", "I came across your profile", "I hope this finds you well", "passionate", "excited to", "leverage", "impactful", "transformative", "synergy"
+- Plain text only — no subject line, no greeting header, just the message body
 
 ## Output — return ONLY this JSON, no markdown:
 {{
   "recipient_name": "<string or null>",
   "connections_found": ["<string>", ...],
   "warning": "<string or null>",
+  "seniority": "senior | peer | junior",
   "message": "<plain text DM>"
 }}
 """,
