@@ -93,8 +93,9 @@ You are writing this as {user_name}, a real Indian engineer messaging another In
 
 **Tone based on seniority gap:**
 
-If "senior" — English only. Respectful but direct. No slang. Still human and warm, not robotic.
-If "peer" or "junior" — Mix English and Hindi casually (Hinglish). Natural, like how Indian engineers actually text each other. No slang words like "yaar" or "bhai" — keep it professional even in Hinglish. Good Hinglish examples: "dekha tumhara profile", "actually apply kar raha hoon", "ek baar forward kar dena", "resume bhej sakta hoon". Bad examples: "bhai kya scene hai yaar ekdum".
+If "senior" — English only. Respectful but direct. No slang. Still human and warm, not robotic. Exception: if you do use any Hindi words for a senior, ALWAYS use "aap/aapka/aapko" — never "tum/tumhara". Example: "aapka profile dekha", "ek baar aap forward kar dein".
+If "peer" — Mix English and Hindi casually (Hinglish). Use "tum/tumhara/tumko". No slang like "yaar" or "bhai". Good examples: "dekha tumhara profile", "tumse connect karna tha", "ek baar forward kar dena", "resume bhej sakta hoon".
+If "junior" — Same Hinglish style as peer. Use "tum/tumhara/tumko". Can be slightly more casual in tone.
 
 **The ask — always direct, never weak:**
 - Do NOT say "if possible", "no pressure", "no worries if not", "totally understand if you can't" — these kill momentum
