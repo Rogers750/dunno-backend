@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 from database.supabase_client import supabase, supabase_admin
 
@@ -24,7 +24,7 @@ def _get_user(credentials: HTTPAuthorizationCredentials):
 
 
 class ReferralRequest(BaseModel):
-    linkedin_url: str
+    profile_text: str   # raw text pasted from LinkedIn (Cmd+A, Cmd+C)
     company: str
     role: str
 
@@ -39,18 +39,23 @@ async def generate_referral(
     """
     Generate a personalised referral request message.
 
-    Scrapes the given LinkedIn profile, finds shared connections with the user
-    (same college, same past company), and writes a targeted DM.
+    User pastes raw LinkedIn profile text (Cmd+A → Cmd+C on the profile page).
+    DeepSeek parses it, finds shared connections with the user's background,
+    and writes a targeted DM.
 
     Returns:
     - message: the referral message to send
-    - warning: non-null if the profile doesn't appear to work at the target company
-    - connections_found: list of shared connections used to personalise the message
-    - recipient_name: name extracted from the scraped profile
+    - connections_found: shared connections used to personalise the message
+    - recipient_name: name extracted from the pasted text
     """
     user = _get_user(credentials)
 
-    # Load user's portfolio
+    if not payload.profile_text or len(payload.profile_text.strip()) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Profile text is too short. Please paste the full LinkedIn profile (Cmd+A → Cmd+C on the profile page).",
+        )
+
     portfolio = (
         supabase_admin.table("portfolios")
         .select("generated_content")
@@ -69,7 +74,7 @@ async def generate_referral(
 
     from referral.crew import generate_referral_message
     result = generate_referral_message(
-        linkedin_url=payload.linkedin_url,
+        profile_text=payload.profile_text,
         company=payload.company,
         role=payload.role,
         gen_content=gen_content,
