@@ -84,46 +84,60 @@ Classify:
 
 ## Step 5 — Write the DM
 
-This is a LinkedIn DM between two Indian engineers. It should feel like a real person typed it — not a template, not a cover letter excerpt.
+This is a LinkedIn DM between two Indian engineers. It must feel like a real person typed it — not a template, not a cover letter excerpt. Before writing, ask: does this read as one connected thought, or 3 separate facts bolted together? If the latter, rewrite it.
 
-**Before writing, ask yourself: does this message flow as one connected thought, or does it feel like 3 separate facts bolted together?** If the latter, rewrite it.
+### Seniority & language rules
 
-### Tone by seniority
+**Junior (0-3 yrs, or clearly below sender's level)**
+→ Use "tum/tumhara/tumko". Hinglish is natural, mix where it flows. Casual but not sloppy.
 
-**senior** → English only. Composed, warm, direct. If any Hindi word slips in naturally, use aap/aapka/aapko — never tum. Don't force Hindi.
+**Senior (4+ yrs, or clearly above sender's level)**
+→ Use "aap/aapka/aapko" for any Hindi. Now flip a coin on language:
+  - Sometimes write the whole message in clean professional English (no Hindi at all)
+  - Sometimes write it as light Hinglish with aap
+  Both are real. Alternating across users keeps it from looking templated. Pick one and commit.
 
-**peer / junior** → Hinglish. Mix naturally — not every sentence needs Hindi, just where it flows. Use tum/tumhara/tumko for Hindi pronouns, never aap. No slang ("yaar", "bhai") — keep it professional even in Hinglish.
+**Same batch / similar experience**
+→ Use "tum". Hinglish, feels like talking to a batchmate.
 
 ### How to build the message — 3 beats
 
-**Beat 1 — The hook**
-If shared connection exists: open with it as a genuine observation, not a statement of fact. It should feel like "oh I noticed this" not "I have identified that we share X". One sentence.
-If no shared connection: say something specific about what they actually work on that made you reach out to them specifically — not generic flattery.
+**Beat 1 — The hook (1 sentence)**
+Shared connection → open with it as a genuine observation. Feels like "oh I noticed this", not "I have identified we share X".
+No shared connection → say something specific about their actual work that made you reach out to them in particular. Not flattery — observation.
 
-**Beat 2 — The context**
-What you do + what you're going for. One sentence. Do NOT list technologies. Do NOT use the full job title. Describe the work: "data engineering role", "backend role", "analytics role". Just enough for them to know why it's relevant.
+**Beat 2 — The context (1 sentence)**
+What you do + what you're going for. No tech stack. No full job title — use the short form ("data engineering role", "backend role"). Just enough for relevance.
 
-**Beat 3 — The ask**
-Direct. Confident. Assume they'll say yes.
-Good: "ek baar resume forward kar dena", "can you refer me or pass it to the team — sending resume right now"
-Bad: "if possible", "no pressure", "no worries if not", "would it be okay if" — these all go in the bin.
-End by offering to send the resume immediately.
+**Beat 3 — The ask (1-2 sentences)**
+Direct. Confident. Assume yes.
+Good: "ek baar forward kar dena resume", "can you refer me or pass it along — sending resume now"
+Offer to send resume immediately. No hedging.
 
-### Hard rules — no exceptions
-- First name only at the start. No "Hi", no "Dear", no greeting word.
-- NEVER list the tech stack in the message
-- NEVER use the full job title — shorten it
-- The message must read as one connected thought, not disconnected bullet sentences
-- 1 deliberate small imperfection — a missing apostrophe (dont, Im, its) or a very slight run-on. Just one.
-- 80-100 words. Tight.
-- NEVER use: "I am reaching out", "I came across your profile", "I hope this finds you well", "passionate", "excited to", "leverage", "impactful", "transformative", "synergy", "as per", "please revert"
+### Banned phrases — regardless of seniority
+- "I came across your profile"
+- "hope this doesn't bother you"
+- "I know you're busy"
+- "it would mean a lot to me"
+- "if possible", "no pressure", "no worries if not"
+- any tech stack list
+- years of experience as a number ("5 years", "3+ years")
+- "resume attached" or any mention of attachment
+- compliments directed at them ("your work is impressive", "I really admire")
+- "I am reaching out", "I hope this finds you well", "passionate", "excited to", "leverage", "impactful", "synergy"
+
+### Imperfection rule
+Exactly one small natural error — a missing comma, a slightly run-on sentence, "toh" instead of "so", casual "kar" instead of "karna".
+Never a spelling mistake on a name or company. Never broken grammar that makes meaning unclear.
+
+### Hard rules
+- First name only at the start. No "Hi", no "Dear".
+- 80-100 words max.
 - Plain text only. No formatting.
 
-### Examples of tone (peer/junior, Hinglish)
+### Example (peer/junior, Hinglish)
 BAD: "Rishabh, both of us at NIT Kurukshetra — dekha tumhara profile. tum JPMC mein ho, main apply kar raha hoon Software Engineer III - Data Engineering role. PySpark, AWS, Databricks ka hai."
 GOOD: "Rishabh, randomly dekha tumhara profile — NIT Kurukshetra batch ho tum bhi. Im applying for a data engineering role at JPMC, exactly the kind of work you're doing there. Resume bhej raha hoon, ek baar team ko forward kar dena."
-
-Notice what changed: the good version flows as one thought, doesnt list tech, shortens the title, and the ask comes naturally at the end.
 
 ---
 
