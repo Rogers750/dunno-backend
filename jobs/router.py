@@ -1,4 +1,5 @@
 import logging
+import uuid as _uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -118,7 +119,7 @@ async def list_jobs(credentials: HTTPAuthorizationCredentials = Depends(security
         supabase_admin.table("user_matched_jobs")
         .select("id, job_id, match_score, score_breakdown, company_info, status")
         .eq("user_id", user.id)
-        .not_.in_("status", ["applied", "rejected", "asked_for_referral", "interview_scheduled"])
+        .not_.in_("status", ["applied", "rejected", "referral_asked", "interview_scheduled"])
         .order("match_score", desc=True)
         .limit(10)
         .execute()
@@ -168,6 +169,11 @@ async def get_job(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     """Full detail for one matched job including resume, cover letter, projects."""
+    try:
+        _uuid.UUID(match_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Match not found")
+
     user = _get_user(credentials)
 
     row = (
@@ -261,7 +267,7 @@ async def mark_referral_asked(
     match_id: str,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    """Mark a job as asked_for_referral. Removes it from the active job list."""
+    """Mark a job as referral_asked. Removes it from the active job list."""
     user = _get_user(credentials)
     row = (
         supabase_admin.table("user_matched_jobs")
@@ -275,11 +281,11 @@ async def mark_referral_asked(
 
     updated = (
         supabase_admin.table("user_matched_jobs")
-        .update({"status": "asked_for_referral"})
+        .update({"status": "referral_asked"})
         .eq("id", match_id)
         .execute()
     )
-    return updated.data[0] if updated.data else {"id": match_id, "status": "asked_for_referral"}
+    return updated.data[0] if updated.data else {"id": match_id, "status": "referral_asked"}
 
 
 # ── PATCH /jobs/:id/interview ─────────────────────────────────────────────────
