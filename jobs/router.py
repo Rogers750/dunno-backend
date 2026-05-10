@@ -118,7 +118,7 @@ async def list_jobs(credentials: HTTPAuthorizationCredentials = Depends(security
         supabase_admin.table("user_matched_jobs")
         .select("id, job_id, match_score, score_breakdown, company_info, status")
         .eq("user_id", user.id)
-        .not_.in_("status", ["applied", "rejected"])
+        .not_.in_("status", ["applied", "rejected", "asked_for_referral", "interview_scheduled"])
         .order("match_score", desc=True)
         .limit(10)
         .execute()
@@ -252,6 +252,62 @@ async def reject_job(
         .execute()
     )
     return updated.data[0] if updated.data else {"id": match_id, "status": "rejected"}
+
+
+# ── PATCH /jobs/:id/referral ─────────────────────────────────────────────────
+
+@jobs_router.patch("/{match_id}/referral")
+async def mark_referral_asked(
+    match_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Mark a job as asked_for_referral. Removes it from the active job list."""
+    user = _get_user(credentials)
+    row = (
+        supabase_admin.table("user_matched_jobs")
+        .select("id")
+        .eq("id", match_id)
+        .eq("user_id", user.id)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    updated = (
+        supabase_admin.table("user_matched_jobs")
+        .update({"status": "asked_for_referral"})
+        .eq("id", match_id)
+        .execute()
+    )
+    return updated.data[0] if updated.data else {"id": match_id, "status": "asked_for_referral"}
+
+
+# ── PATCH /jobs/:id/interview ─────────────────────────────────────────────────
+
+@jobs_router.patch("/{match_id}/interview")
+async def mark_interview_scheduled(
+    match_id: str,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Mark a job as interview_scheduled. Removes it from the active job list."""
+    user = _get_user(credentials)
+    row = (
+        supabase_admin.table("user_matched_jobs")
+        .select("id")
+        .eq("id", match_id)
+        .eq("user_id", user.id)
+        .execute()
+    )
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    updated = (
+        supabase_admin.table("user_matched_jobs")
+        .update({"status": "interview_scheduled"})
+        .eq("id", match_id)
+        .execute()
+    )
+    return updated.data[0] if updated.data else {"id": match_id, "status": "interview_scheduled"}
 
 
 # ── GET /jobs/:id/resume ──────────────────────────────────────────────────────
