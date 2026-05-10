@@ -161,6 +161,32 @@ async def list_applied_jobs(credentials: HTTPAuthorizationCredentials = Depends(
     return results
 
 
+# ── GET /jobs/referral_asked ──────────────────────────────────────────────────
+
+@jobs_router.get("/referral_asked")
+async def list_referral_asked_jobs(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """All jobs the user has marked as referral_asked."""
+    user = _get_user(credentials)
+
+    matches = (
+        supabase_admin.table("user_matched_jobs")
+        .select("id, job_id, match_score, score_breakdown, company_info, status")
+        .eq("user_id", user.id)
+        .eq("status", "referral_asked")
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    results = []
+    for row in matches.data or []:
+        job_row = supabase_admin.table("job_listings").select("*").eq("id", row["job_id"]).execute()
+        if not job_row.data:
+            continue
+        results.append(_build_summary(row, job_row.data[0]))
+
+    return results
+
+
 # ── GET /jobs/:id ─────────────────────────────────────────────────────────────
 
 @jobs_router.get("/{match_id}")
