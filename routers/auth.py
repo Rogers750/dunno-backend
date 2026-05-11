@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -31,11 +32,12 @@ async def send_otp(payload: OtpSendRequest):
 
 @router.post("/verification/verify", response_model=AuthResponse)
 async def verify_otp(payload: OtpVerifyRequest):
+    expiry = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
     row = (
         supabase_admin.table("otp_sessions")
         .select("email, created_at")
         .eq("id", payload.session_id)
-        .gt("created_at", "now() - interval '10 minutes'")
+        .gt("created_at", expiry)
         .limit(1)
         .execute()
     )
