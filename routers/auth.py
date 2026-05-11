@@ -63,7 +63,6 @@ async def verify_otp(payload: OtpVerifyRequest):
     if not result.user or not result.session:
         raise HTTPException(status_code=400, detail="OTP verification failed")
 
-    _otp_sessions.pop(payload.session_id, None)
     user = result.user
     email = user.email or email
 
