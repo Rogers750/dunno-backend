@@ -118,16 +118,27 @@ def _fetch_job(job_id: str) -> Optional[dict]:
 
 
 def _extract_role_keywords(target_roles: list[str]) -> list[str]:
-    """Extract searchable keywords from target roles. e.g. 'Senior Data Engineer' → ['data engineer', 'senior data engineer']"""
-    _GENERIC = {"senior", "junior", "lead", "staff", "principal", "associate", "mid", "entry"}
+    """Extract searchable keywords from target roles. e.g. 'Senior Data Engineer' → ['data engineer', 'senior data engineer', 'data', 'engineer']"""
+    _SENIORITY = {"senior", "junior", "lead", "staff", "principal", "associate", "mid", "entry"}
+    _GENERIC_ROLE = {
+        "engineer", "developer", "manager", "analyst", "architect", "specialist",
+        "consultant", "executive", "intern", "officer", "head", "director",
+        "data", "software", "tech", "technical", "product", "platform",
+    }
+    _STOP = {"and", "the", "of", "in", "at", "for", "with", "a", "an"}
+    _SKIP = _SENIORITY | _GENERIC_ROLE | _STOP
     keywords = set()
     for role in target_roles:
         role_lower = role.lower().strip()
         keywords.add(role_lower)
-        # also add without seniority prefix
         parts = role_lower.split()
-        if parts[0] in _GENERIC and len(parts) > 1:
+        # add without seniority prefix
+        if parts and parts[0] in _SENIORITY and len(parts) > 1:
             keywords.add(" ".join(parts[1:]))
+        # add individual domain-specific words only (e.g. "backend", "mlops", "devops")
+        for word in parts:
+            if word not in _SKIP and len(word) > 3:
+                keywords.add(word)
     return list(keywords)
 
 
