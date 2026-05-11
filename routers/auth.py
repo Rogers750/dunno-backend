@@ -1,4 +1,3 @@
-import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -12,10 +11,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
-# temporary in-memory store: session_id -> email
-_otp_sessions: dict[str, str] = {}
-
-
 @router.post("/verification/send")
 async def send_otp(payload: OtpSendRequest):
     logger.info(f"[verification/send] email={payload.email}")
@@ -28,18 +23,28 @@ async def send_otp(payload: OtpSendRequest):
         logger.error(f"[verification/send] failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
-    session_id = str(uuid.uuid4())
-    _otp_sessions[session_id] = payload.email
+    row = supabase_admin.table("otp_sessions").insert({"email": payload.email}).execute()
+    session_id = row.data[0]["id"]
     logger.info(f"[verification/send] OTP sent, session_id={session_id}")
     return {"message": "OTP sent to your email", "session_id": session_id}
 
 
 @router.post("/verification/verify", response_model=AuthResponse)
 async def verify_otp(payload: OtpVerifyRequest):
-    email = _otp_sessions.get(payload.session_id)
-    if not email:
+    row = (
+        supabase_admin.table("otp_sessions")
+        .select("email, created_at")
+        .eq("id", payload.session_id)
+        .gt("created_at", "now() - interval '10 minutes'")
+        .limit(1)
+        .execute()
+    )
+    if not row.data:
         logger.warning(f"[verification/verify] invalid session_id={payload.session_id}")
         raise HTTPException(status_code=400, detail="Invalid or expired session")
+
+    email = row.data[0]["email"]
+    supabase_admin.table("otp_sessions").delete().eq("id", payload.session_id).execute()
 
     logger.info(f"[verification/verify] session_id={payload.session_id} email={email}")
     try:
