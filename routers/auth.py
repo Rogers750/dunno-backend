@@ -2,6 +2,7 @@ import uuid
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
 
 from database.supabase_client import supabase, supabase_admin
 from models.auth import OtpSendRequest, OtpVerifyRequest, AuthResponse, UserResponse
@@ -131,15 +132,17 @@ async def google_oauth(credentials: HTTPAuthorizationCredentials = Depends(secur
     return UserResponse(id=user.id, email=email, username=candidate, status="onboarding")
 
 
-DEV_EMAIL = "sagarsinghraw77@gmail.com"
+class DevLoginRequest(BaseModel):
+    email: str
 
 
 @router.post("/dev-login", response_model=AuthResponse)
-async def dev_login():
+async def dev_login(body: DevLoginRequest):
+    email = body.email
     try:
         result = supabase_admin.auth.admin.generate_link({
             "type": "magiclink",
-            "email": DEV_EMAIL,
+            "email": email,
         })
     except Exception as e:
         logger.error(f"[dev-login] generate_link failed: {e}")
@@ -167,14 +170,14 @@ async def dev_login():
         username = existing.data[0]["username"]
         status = existing.data[0].get("status", "onboarding")
     else:
-        username = "sagarrawal"
+        username = email.split("@")[0]
         status = "onboarding"
-        supabase.table("profiles").insert({"id": user.id, "username": username, "email": DEV_EMAIL, "status": status}).execute()
+        supabase.table("profiles").insert({"id": user.id, "username": username, "email": email, "status": status}).execute()
 
     logger.info(f"[dev-login] success id={user.id} status={status}")
     return AuthResponse(
         access_token=verified.session.access_token,
-        user=UserResponse(id=user.id, email=DEV_EMAIL, username=username, status=status),
+        user=UserResponse(id=user.id, email=email, username=username, status=status),
     )
 
 
