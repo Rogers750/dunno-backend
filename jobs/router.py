@@ -119,7 +119,7 @@ async def list_jobs(credentials: HTTPAuthorizationCredentials = Depends(security
         supabase_admin.table("user_matched_jobs")
         .select("id, job_id, match_score, score_breakdown, company_info, status")
         .eq("user_id", user.id)
-        .not_.in_("status", ["applied", "rejected", "referral_asked", "interview_scheduled"])
+        .not_.in_("status", ["applied", "rejected", "referral_asked", "interview_scheduled", "expired"])
         .order("match_score", desc=True)
         .limit(10)
         .execute()

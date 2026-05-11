@@ -160,10 +160,12 @@ def _get_relevant_unmatched_from_db(
     exp_ceiling = float(pref_max) if pref_max is not None else (candidate_years + 1.5)
 
     # ── Fetch all live unmatched jobs ─────────────────────────────────────────
+    now = datetime.utcnow().isoformat()
     query = (
         supabase_admin.table("job_listings")
         .select("id, title, location, min_experience")
         .eq("is_live", True)
+        .or_(f"expires_at.is.null,expires_at.gt.{now}")
         .not_.in_("id", list(matched_ids) or ["00000000-0000-0000-0000-000000000000"])
     )
     rows = query.execute().data or []
