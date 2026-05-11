@@ -46,7 +46,6 @@ async def verify_otp(payload: OtpVerifyRequest):
         raise HTTPException(status_code=400, detail="Invalid or expired session")
 
     email = row.data[0]["email"]
-    supabase_admin.table("otp_sessions").delete().eq("id", payload.session_id).execute()
 
     logger.info(f"[verification/verify] session_id={payload.session_id} email={email}")
     try:
@@ -58,6 +57,8 @@ async def verify_otp(payload: OtpVerifyRequest):
     except Exception as e:
         logger.warning(f"[verification/verify] failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    supabase_admin.table("otp_sessions").delete().eq("id", payload.session_id).execute()
 
     if not result.user or not result.session:
         raise HTTPException(status_code=400, detail="OTP verification failed")
