@@ -77,7 +77,7 @@ async def generate_referral(
         target_roles = portfolio.data[0].get("target_roles") or []
         role = target_roles[0] if target_roles else ""
 
-    from referral.crew import generate_referral_message
+    from referral.generate import generate_referral_message
     result = generate_referral_message(
         profile_text=payload.profile_text,
         company=payload.company,
