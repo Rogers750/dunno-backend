@@ -26,7 +26,7 @@ def _get_user(credentials: HTTPAuthorizationCredentials):
 class ReferralRequest(BaseModel):
     profile_text: str   # raw text pasted from LinkedIn (Cmd+A, Cmd+C)
     company: str
-    role: str
+    role: str = ""
 
 
 # ── POST /referral/generate ───────────────────────────────────────────────────
@@ -58,7 +58,7 @@ async def generate_referral(
 
     portfolio = (
         supabase_admin.table("portfolios")
-        .select("generated_content")
+        .select("generated_content, target_roles")
         .eq("user_id", user.id)
         .eq("published", True)
         .limit(1)
@@ -72,11 +72,16 @@ async def generate_referral(
 
     gen_content = portfolio.data[0]["generated_content"]
 
+    role = payload.role.strip()
+    if not role:
+        target_roles = portfolio.data[0].get("target_roles") or []
+        role = target_roles[0] if target_roles else ""
+
     from referral.crew import generate_referral_message
     result = generate_referral_message(
         profile_text=payload.profile_text,
         company=payload.company,
-        role=payload.role,
+        role=role,
         gen_content=gen_content,
     )
 

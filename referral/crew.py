@@ -240,7 +240,7 @@ def generate_referral_message(
             f"SENDER: {user_name} ({user_title})\n"
             f"RECIPIENT: {recipient_name}, seniority level: {seniority}\n"
             f"SHARED CONNECTIONS:\n{connections_str}\n"
-            f"JOB: a {role.split()[0].lower()} role at {company} "
+            f"JOB: a {role.split()[0].lower() if role.split() else 'relevant'} role at {company} "
             f"— use a short natural form like 'data engineering role' or 'backend role', "
             f"never the full job title\n\n"
             f"LANGUAGE RULE (follow exactly): {lang_instruction}\n\n"

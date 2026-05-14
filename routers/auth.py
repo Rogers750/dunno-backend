@@ -90,6 +90,7 @@ async def verify_otp(payload: OtpVerifyRequest):
 
     return AuthResponse(
         access_token=result.session.access_token,
+        refresh_token=result.session.refresh_token or "",
         user=UserResponse(id=user.id, email=email, username=username, status=status),
     )
 
@@ -184,8 +185,27 @@ async def dev_login(body: DevLoginRequest):
     logger.info(f"[dev-login] success id={user.id} status={status}")
     return AuthResponse(
         access_token=verified.session.access_token,
+        refresh_token=verified.session.refresh_token or "",
         user=UserResponse(id=user.id, email=email, username=username, status=status),
     )
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+@router.post("/refresh")
+async def refresh_token(payload: RefreshRequest):
+    try:
+        result = supabase.auth.refresh_session(payload.refresh_token)
+    except Exception as e:
+        logger.error(f"[refresh] failed: {e}")
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    if not result.session:
+        raise HTTPException(status_code=401, detail="Refresh failed")
+    return {
+        "access_token": result.session.access_token,
+        "refresh_token": result.session.refresh_token or "",
+    }
 
 
 @router.get("/me", response_model=UserResponse)
