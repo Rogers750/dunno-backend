@@ -33,6 +33,7 @@ app.add_middleware(
         "https://dunnoai.com",
         "https://www.dunnoai.com",
     ],
+    allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
