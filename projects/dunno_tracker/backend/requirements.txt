@@ -1,0 +1,14 @@
+fastapi>=0.115.5
+uvicorn[standard]>=0.32.1
+supabase==2.30.0
+pydantic>=2.11.7
+pydantic-settings>=2.6.1
+python-dotenv>=1.0.1
+httpx>=0.27
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+slowapi>=0.1.9
+# Postgres support
+psycopg2-binary>=2.9.9
+# ClickHouse support
+clickhouse-connect>=0.7.0
